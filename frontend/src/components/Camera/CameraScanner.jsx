@@ -219,6 +219,12 @@ const CameraScanner = ({ onCapture, onClose }) => {
             videoConstraints={{
               deviceId: selectedDevice,
               facingMode: 'environment',
+              // Without explicit ideals, browsers often default to a low
+              // resolution (e.g. 720p) - nowhere near enough detail to read
+              // small book-spine text. Request the camera's max and let it
+              // fall back gracefully on devices that can't hit this.
+              width: { ideal: 4096 },
+              height: { ideal: 2160 },
             }}
             className="webcam"
           />
