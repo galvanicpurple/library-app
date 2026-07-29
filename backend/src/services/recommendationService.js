@@ -203,8 +203,12 @@ const getGenreRecommendations = async (userId) => {
 // Get unread books from library
 const getUnreadBooks = async (userId) => {
   try {
+    // No DISTINCT needed: the WHERE r.id IS NULL filter means the LEFT JOIN
+    // can't fan out to multiple rows per ub.id, so rows are already unique.
+    // (DISTINCT + ORDER BY ub.created_at would require created_at in the
+    // select list, which Postgres rejects otherwise.)
     const result = await query(
-      `SELECT DISTINCT
+      `SELECT
         b.id, b.title, b.authors, b.image_url, b.categories, b.description,
         ub.id as user_book_id,
         'unread' as reading_status
