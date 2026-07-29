@@ -38,5 +38,70 @@
 }
 
 .scan-results h2 {
-  margin-bottom: 30px;
+  margin-bottom: 20px;
+}
+
+.scan-add-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 16px;
+  background-color: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px var(--shadow);
+}
+
+.shelf-picker {
+  flex: 1;
+  min-width: 200px;
+}
+
+.scan-book-card {
+  position: relative;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s;
+}
+
+.scan-book-card.selected {
+  border-color: var(--primary);
+}
+
+.scan-book-checkbox {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.scan-added-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 1;
+}
+
+.scan-results-footer {
+  margin-top: 30px;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .scan-add-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .scan-add-bar .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
