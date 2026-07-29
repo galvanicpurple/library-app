@@ -217,12 +217,45 @@ export const parseBookInfoFromText = (text) => {
   return bookInfo;
 };
 
+// Google returns *something* for nearly any query, even OCR garbage from a
+// decorative border - so blindly trusting the top hit produces confident
+// nonsense (e.g. a scanned Tolkien title page matching an ornithology
+// journal because of a misread fragment). Require the match to actually
+// share a real word with what was scanned before accepting it.
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'this', 'that', 'book', 'books',
+  'part', 'first', 'second', 'third', 'edition', 'york', 'foreword', 'author',
+]);
+const significantTokens = (text) => (
+  (text.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w) => !STOPWORDS.has(w))
+);
+
+const isRelevantMatch = (queryText, book) => {
+  const queryTokens = new Set(significantTokens(queryText));
+  if (queryTokens.size === 0) return true; // nothing distinctive to check against
+  const bookTokens = significantTokens(`${book.title || ''} ${book.subtitle || ''} ${(book.authors || []).join(' ')}`);
+  return bookTokens.some((t) => queryTokens.has(t));
+};
+
+// Among the results that actually match, prefer one with a cover image over
+// one without. Deliberately does NOT re-sort by date - Google's own
+// relevance ranking is what keeps the actual right book on top; sorting by
+// "most recent" instead would readily promote an unrelated but newer title
+// (e.g. a 2025 commentary book like "Potter Stinks" outranking the actual
+// Harry Potter novel just for being newer).
+const pickBestMatch = (queryText, books) => {
+  const relevant = books.filter((b) => isRelevantMatch(queryText, b));
+  if (relevant.length === 0) return null;
+  return relevant.find((b) => b.imageUrl) || relevant[0];
+};
+
 // Search for a single candidate (one detected book) using its ISBN if present,
 // otherwise its OCR'd text. Returns at most one match so a single spine
 // doesn't crowd out the other books in the photo.
 const searchCandidate = async (candidate) => {
   const bookInfo = parseBookInfoFromText(candidate.text);
 
+  // ISBN matches are exact/authoritative - no relevance filtering needed.
   for (const isbn of bookInfo.potentialISBNs.slice(0, 2)) {
     try {
       const books = await searchByISBN(isbn);
@@ -242,7 +275,8 @@ const searchCandidate = async (candidate) => {
   const combinedText = candidate.lines.join(' ');
   try {
     const books = await searchGoogleBooks(combinedText);
-    if (books.length > 0) return books[0];
+    const match = pickBestMatch(combinedText, books);
+    if (match) return match;
   } catch (error) {
     console.error(`Failed to search combined text "${combinedText}":`, error.message);
   }
@@ -255,7 +289,8 @@ const searchCandidate = async (candidate) => {
   if (authorGuess) {
     try {
       const books = await searchByTitleAuthor(titleGuess, authorGuess);
-      if (books.length > 0) return books[0];
+      const match = pickBestMatch(candidate.text, books);
+      if (match) return match;
     } catch (error) {
       console.error(`Failed to search "${titleGuess}" by "${authorGuess}":`, error.message);
     }
@@ -263,7 +298,8 @@ const searchCandidate = async (candidate) => {
 
   try {
     const books = await searchByTitleAuthor(titleGuess);
-    if (books.length > 0) return books[0];
+    const match = pickBestMatch(candidate.text, books);
+    if (match) return match;
   } catch (error) {
     console.error(`Failed to search title "${titleGuess}":`, error.message);
   }
