@@ -218,8 +218,8 @@ export const parseBookInfoFromText = (text) => {
 };
 
 // Search for a single candidate (one detected book) using its ISBN if present,
-// otherwise its likely title/author lines. Returns at most one match so a
-// single spine doesn't crowd out the other books in the photo.
+// otherwise its OCR'd text. Returns at most one match so a single spine
+// doesn't crowd out the other books in the photo.
 const searchCandidate = async (candidate) => {
   const bookInfo = parseBookInfoFromText(candidate.text);
 
@@ -232,10 +232,25 @@ const searchCandidate = async (candidate) => {
     }
   }
 
-  // Book spines/covers most commonly print title then author as consecutive
-  // lines - try that pairing before falling back to title-only.
+  // Stylized covers commonly split a title across several lines (e.g. "THE" /
+  // "FELLOWSHIP" / "OF THE RING"). Searching with all of them combined gives
+  // Google's relevance ranking the full context to match against - critical,
+  // because guessing "line 2 is the author" is wrong as often as it's right,
+  // and can send the search off after a completely unrelated book (e.g.
+  // treating "FELLOWSHIP" as an author name matches books published by an
+  // organization with "Fellowship" in its name, not the Tolkien novel).
+  const combinedText = candidate.lines.join(' ');
+  try {
+    const books = await searchGoogleBooks(combinedText);
+    if (books.length > 0) return books[0];
+  } catch (error) {
+    console.error(`Failed to search combined text "${combinedText}":`, error.message);
+  }
+
+  // Only fall back to a title+author split when we have an actual author
+  // signal (an explicit "by ..."/"author: ..." line), not a blind guess.
   const titleGuess = candidate.lines[0];
-  const authorGuess = candidate.lines[1] || bookInfo.potentialAuthors[0] || '';
+  const authorGuess = bookInfo.potentialAuthors[0];
 
   if (authorGuess) {
     try {
