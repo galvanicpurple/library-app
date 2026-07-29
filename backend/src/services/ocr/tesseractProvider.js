@@ -21,7 +21,13 @@ const getWorker = async () => {
         tessedit_char_whitelist: CHAR_WHITELIST,
       });
       return worker;
-    })();
+    })().catch((error) => {
+      // Don't cache a failed worker forever - a transient failure (e.g. a
+      // cold-start hiccup downloading language data) would otherwise brick
+      // every scan request until the process restarts.
+      workerPromise = null;
+      throw error;
+    });
   }
   return workerPromise;
 };

@@ -5,8 +5,11 @@ import { recognizeImage } from './ocr/index.js';
 export const searchGoogleBooks = async (query) => {
   try {
     const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+    if (!apiKey) {
+      console.error('GOOGLE_BOOKS_API_KEY is not set - every book search will fail with a 400/403 from Google.');
+    }
     const url = `https://www.googleapis.com/books/v1/volumes`;
-    
+
     const response = await axios.get(url, {
       params: {
         q: query,
@@ -41,7 +44,11 @@ export const searchGoogleBooks = async (query) => {
 
     return books;
   } catch (error) {
-    console.error('Google Books API error:', error.message);
+    // Surface Google's actual error body (e.g. "API key not valid", quota
+    // exceeded) instead of just the generic HTTP status - that detail is
+    // what actually explains *why* every search is failing.
+    const details = error.response?.data?.error?.message || error.message;
+    console.error(`Google Books API error (status ${error.response?.status}):`, details);
     throw new Error('Failed to search Google Books');
   }
 };
