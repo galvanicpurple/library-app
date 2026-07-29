@@ -1,9 +1,6 @@
 import sharp from 'sharp';
 import { createWorker, PSM } from 'tesseract.js';
 
-// Whitelist covers book titles/authors: letters, numbers, and common punctuation.
-const CHAR_WHITELIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,&-:'";
-
 // Book spines and covers can be photographed in any of these orientations.
 const ROTATIONS = [0, 90, 270];
 
@@ -16,9 +13,13 @@ const getWorker = async () => {
   if (!workerPromise) {
     workerPromise = (async () => {
       const worker = await createWorker('eng');
+      // Note: tessedit_char_whitelist is intentionally NOT set here - it's a
+      // documented no-op under the LSTM engine (tesseract.js's default;
+      // https://github.com/tesseract-ocr/tesseract/issues/751), so setting it
+      // was dead weight. Junk characters are filtered downstream instead, in
+      // parseBookInfoFromText.
       await worker.setParameters({
         tessedit_pageseg_mode: PSM.AUTO,
-        tessedit_char_whitelist: CHAR_WHITELIST,
       });
       return worker;
     })().catch((error) => {
@@ -70,7 +71,19 @@ export const recognizeImage = async (imageBuffer) => {
       const { data } = await worker.recognize(processed);
 
       const score = scoreResult(data);
-      console.log(`OCR rotation ${rotation}deg: confidence=${data.confidence?.toFixed(1)}, score=${score.toFixed(1)}`);
+      const wordCount = data.words?.length || 0;
+      console.log(
+        `OCR rotation ${rotation}deg: confidence=${data.confidence?.toFixed(1)}, `
+        + `words=${wordCount}, lines=${data.lines?.length || 0}, score=${score.toFixed(1)}`
+      );
+      // High confidence with zero words/lines means Tesseract found a
+      // text-shaped region but couldn't decode any characters from it -
+      // usually a photo-quality issue (blur, glare, extreme angle), not a
+      // code bug. Logged explicitly so it isn't mistaken for the pipeline
+      // silently failing.
+      if (data.confidence > 50 && wordCount === 0) {
+        console.warn(`OCR rotation ${rotation}deg: high confidence but no words decoded - likely a blurry/low-quality photo region`);
+      }
 
       if (score > best.score) {
         best = { text: data.text, score };

@@ -16,6 +16,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust exactly one reverse-proxy hop (Railway, and most PaaS hosts) so
+// express-rate-limit can correctly read the real client IP from
+// X-Forwarded-For instead of throwing/misidentifying every request.
+app.set('trust proxy', 1);
+
 // Security middleware (helmet, logging)
 app.use(securityMiddleware);
 
