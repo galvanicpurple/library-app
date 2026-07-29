@@ -101,17 +101,17 @@ CREATE TABLE IF NOT EXISTS scan_sessions (
     image_url VARCHAR(500)
 );
 
--- Create indexes for performance
-CREATE INDEX idx_user_books_user_id ON user_books(user_id);
-CREATE INDEX idx_user_books_book_id ON user_books(book_id);
-CREATE INDEX idx_user_books_shelf_id ON user_books(shelf_id);
-CREATE INDEX idx_readings_user_id ON readings(user_id);
-CREATE INDEX idx_readings_status ON readings(status);
-CREATE INDEX idx_books_isbn ON books(isbn);
-CREATE INDEX idx_books_title ON books(title);
-CREATE INDEX idx_books_authors ON books USING GIN(authors);
-CREATE INDEX idx_books_categories ON books USING GIN(categories);
-CREATE INDEX idx_shelves_user_id ON shelves(user_id);
+-- Create indexes for performance (skip if they already exist)
+CREATE INDEX IF NOT EXISTS idx_user_books_user_id ON user_books(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_books_book_id ON user_books(book_id);
+CREATE INDEX IF NOT EXISTS idx_user_books_shelf_id ON user_books(shelf_id);
+CREATE INDEX IF NOT EXISTS idx_readings_user_id ON readings(user_id);
+CREATE INDEX IF NOT EXISTS idx_readings_status ON readings(status);
+CREATE INDEX IF NOT EXISTS idx_books_isbn ON books(isbn);
+CREATE INDEX IF NOT EXISTS idx_books_title ON books(title);
+CREATE INDEX IF NOT EXISTS idx_books_authors ON books USING GIN(authors);
+CREATE INDEX IF NOT EXISTS idx_books_categories ON books USING GIN(categories);
+CREATE INDEX IF NOT EXISTS idx_shelves_user_id ON shelves(user_id);
 
 -- Update timestamp trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -122,21 +122,27 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Apply update triggers
+-- Apply update triggers (drop first if they exist)
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_shelves_updated_at ON shelves;
 CREATE TRIGGER update_shelves_updated_at BEFORE UPDATE ON shelves
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_books_updated_at ON books;
 CREATE TRIGGER update_books_updated_at BEFORE UPDATE ON books
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_user_books_updated_at ON user_books;
 CREATE TRIGGER update_user_books_updated_at BEFORE UPDATE ON user_books
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_readings_updated_at ON readings;
 CREATE TRIGGER update_readings_updated_at BEFORE UPDATE ON readings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_user_preferences_updated_at ON user_preferences;
 CREATE TRIGGER update_user_preferences_updated_at BEFORE UPDATE ON user_preferences
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
