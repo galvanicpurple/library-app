@@ -1,0 +1,41 @@
+.scan-container {
+  padding: 40px 20px;
+  min-height: calc(100vh - 60px);
+}
+
+.scan-start {
+  text-align: center;
+  padding: 80px 20px;
+}
+
+.scan-start p {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-bottom: 30px;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.btn-large {
+  padding: 15px 30px;
+  font-size: 18px;
+}
+
+.scanning-state {
+  text-align: center;
+  padding: 80px 20px;
+}
+
+.scanning-state p {
+  margin-top: 20px;
+  color: var(--text-secondary);
+}
+
+.scan-results {
+  padding: 20px 0;
+}
+
+.scan-results h2 {
+  margin-bottom: 30px;
+}

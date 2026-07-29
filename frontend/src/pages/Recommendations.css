@@ -1,0 +1,9 @@
+.recommendations-container {
+  padding: 40px 20px;
+  min-height: calc(100vh - 60px);
+}
+
+.recommendations-container h1 {
+  margin-bottom: 30px;
+  font-size: 32px;
+}

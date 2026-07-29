@@ -1,0 +1,30 @@
+{
+  "name": "library-app",
+  "version": "1.0.0",
+  "description": "Personal library management system with camera scanning and smart organization",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "install-all": "npm install && npm install --workspace=frontend && npm install --workspace=backend",
+    "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend"
+  },
+  "keywords": [
+    "library",
+    "books",
+    "camera-scanning",
+    "ocr",
+    "recommendations"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

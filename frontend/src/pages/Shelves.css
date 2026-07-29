@@ -1,0 +1,45 @@
+.shelves-container {
+  padding: 40px 20px;
+  min-height: calc(100vh - 60px);
+}
+
+.shelves-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.shelves-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.shelf-card {
+  padding: 20px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px var(--shadow);
+  transition: transform 0.2s;
+}
+
+.shelf-card:hover {
+  transform: translateY(-2px);
+}
+
+.shelf-card h3 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.shelf-location {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.shelf-count {
+  font-weight: 600;
+  color: var(--primary);
+}
