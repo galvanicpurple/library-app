@@ -73,9 +73,15 @@ export const searchByTitleAuthor = async (title, author = '') => {
 const preprocessImage = async (imageBuffer) => {
   try {
     return await sharp(imageBuffer)
+      .rotate() // Auto-rotate based on EXIF
+      .resize(2000, 2000, { // Increase size for better OCR
+        fit: 'inside',
+        withoutEnlargement: false
+      })
       .greyscale()
       .normalize()
       .sharpen()
+      .threshold(128) // Convert to black and white for better contrast
       .toBuffer();
   } catch (error) {
     console.error('Image preprocessing error:', error);
@@ -89,7 +95,7 @@ export const extractTextFromImage = async (imageBuffer) => {
     // Preprocess image for better OCR
     const processedImage = await preprocessImage(imageBuffer);
 
-    // Perform OCR
+    // Perform OCR with improved settings
     const { data: { text } } = await Tesseract.recognize(
       processedImage,
       'eng',
@@ -98,10 +104,14 @@ export const extractTextFromImage = async (imageBuffer) => {
           if (m.status === 'recognizing text') {
             console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
           }
-        }
+        },
+        // Optimize for book spines
+        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,&-:\'',
       }
     );
 
+    console.log('OCR Extracted Text:', text);
     return text;
   } catch (error) {
     console.error('OCR error:', error);
