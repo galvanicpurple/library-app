@@ -17,23 +17,29 @@ const Register = () => {
     confirmPassword: '',
   });
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [emailTaken, setEmailTaken] = useState(false);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (formError) setFormError('');
+    if (e.target.name === 'email' && emailTaken) setEmailTaken(false);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
+    setEmailTaken(false);
 
     // Validate passwords match
     if (formData.password !== formData.confirmPassword) {
-      toast.error('Passwords do not match');
+      setFormError('Passwords do not match');
       return;
     }
 
     // Validate password strength
     if (formData.password.length < 8) {
-      toast.error('Password must be at least 8 characters');
+      setFormError('Password must be at least 8 characters');
       return;
     }
 
@@ -43,14 +49,17 @@ const Register = () => {
       const { confirmPassword, ...registerData } = formData;
       const response = await authAPI.register(registerData);
       const { user, token } = response.data;
-      
+
       setAuth(user, token);
       toast.success('Registration successful!');
       navigate('/dashboard');
     } catch (error) {
       console.error('Registration error:', error);
       const message = error.response?.data?.error || 'Registration failed';
-      toast.error(message);
+      setFormError(message);
+      if (error.response?.status === 409) {
+        setEmailTaken(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -66,6 +75,18 @@ const Register = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
+          {formError && (
+            <div className="form-error">
+              {formError}
+              {emailTaken && (
+                <>
+                  {' '}
+                  <Link to="/login" className="auth-link">Sign in instead</Link>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="form-group">
             <label htmlFor="fullName" className="label">
               <FaUser /> Full Name
@@ -92,7 +113,7 @@ const Register = () => {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              className="input"
+              className={`input${emailTaken ? ' input-error' : ''}`}
               placeholder="your@email.com"
               required
             />

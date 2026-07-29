@@ -30,6 +30,29 @@ export const validateRegistration = [
   handleValidationErrors
 ];
 
+export const validateEmailChange = [
+  body('newEmail')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Valid email is required'),
+  body('currentPassword')
+    .notEmpty()
+    .withMessage('Current password is required'),
+  handleValidationErrors
+];
+
+export const validatePasswordChange = [
+  body('currentPassword')
+    .notEmpty()
+    .withMessage('Current password is required'),
+  body('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+    .withMessage('Password must contain uppercase, lowercase, and number'),
+  handleValidationErrors
+];
+
 export const validateLogin = [
   body('email')
     .isEmail()

@@ -175,6 +175,93 @@ export const updateProfile = async (req, res) => {
   }
 };
 
+// Update user email (requires current password)
+export const updateEmail = async (req, res) => {
+  try {
+    const { newEmail, currentPassword } = req.body;
+
+    const result = await query(
+      'SELECT id, email, password_hash FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = result.rows[0];
+
+    const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isValidPassword) {
+      // 400, not 401: this is a bad-input error on an already-authenticated
+      // request, not an invalid/expired session - a 401 here would trip the
+      // frontend's global interceptor and log the user out of their session.
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+
+    if (newEmail === user.email) {
+      return res.status(400).json({ error: 'New email must be different from current email' });
+    }
+
+    const existing = await query(
+      'SELECT id FROM users WHERE email = $1 AND id != $2',
+      [newEmail, req.user.id]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'Email already in use by another account' });
+    }
+
+    const updated = await query(
+      'UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, email, full_name',
+      [newEmail, req.user.id]
+    );
+
+    res.json({
+      message: 'Email updated successfully',
+      user: updated.rows[0],
+    });
+  } catch (error) {
+    if (error.code === '23505') { // Unique violation, in case of a race condition
+      return res.status(409).json({ error: 'Email already in use by another account' });
+    }
+    console.error('Update email error:', error);
+    res.status(500).json({ error: 'Failed to update email' });
+  }
+};
+
+// Update user password (requires current password)
+export const updatePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    const result = await query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = result.rows[0];
+
+    const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isValidPassword) {
+      // 400, not 401: this is a bad-input error on an already-authenticated
+      // request, not an invalid/expired session - a 401 here would trip the
+      // frontend's global interceptor and log the user out of their session.
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+
+    const isSamePassword = await bcrypt.compare(newPassword, user.password_hash);
+    if (isSamePassword) {
+      return res.status(400).json({ error: 'New password must be different from current password' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await query(
+      'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [passwordHash, req.user.id]
+    );
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    console.error('Update password error:', error);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+};
+
 // Update user preferences
 export const updatePreferences = async (req, res) => {
   try {

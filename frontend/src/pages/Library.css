@@ -1,6 +1,7 @@
 .library-container {
   padding: 40px 20px;
   min-height: calc(100vh - 60px);
+  min-height: calc(100dvh - 60px);
 }
 
 .library-header {

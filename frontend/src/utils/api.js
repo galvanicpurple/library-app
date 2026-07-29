@@ -43,6 +43,8 @@ export const authAPI = {
   login: (data) => api.post('/auth/login', data),
   getProfile: () => api.get('/auth/profile'),
   updateProfile: (data) => api.put('/auth/profile', data),
+  updateEmail: (data) => api.put('/auth/email', data),
+  updatePassword: (data) => api.put('/auth/password', data),
   updatePreferences: (data) => api.put('/auth/preferences', data),
 };
 

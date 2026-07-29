@@ -1,5 +1,6 @@
 .app {
   min-height: 100vh;
+  min-height: 100dvh; /* accounts for mobile browser chrome (e.g. iOS Safari's address bar) */
   display: flex;
   flex-direction: column;
 }

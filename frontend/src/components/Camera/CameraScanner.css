@@ -47,6 +47,10 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  /* On short viewports the webcam + controls + privacy notice can exceed the
+     screen height; without this the capture button becomes unreachable. */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .webcam-container {

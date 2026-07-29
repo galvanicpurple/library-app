@@ -1,6 +1,5 @@
 import axios from 'axios';
-import Tesseract from 'tesseract.js';
-import sharp from 'sharp';
+import { recognizeImage } from './ocr/index.js';
 
 // Google Books API integration
 export const searchGoogleBooks = async (query) => {
@@ -69,54 +68,104 @@ export const searchByTitleAuthor = async (title, author = '') => {
   }
 };
 
-// Preprocess image for better OCR results
-const preprocessImage = async (imageBuffer) => {
-  try {
-    return await sharp(imageBuffer)
-      .rotate() // Auto-rotate based on EXIF
-      .resize(2000, 2000, { // Increase size for better OCR
-        fit: 'inside',
-        withoutEnlargement: false
-      })
-      .greyscale()
-      .normalize()
-      .sharpen()
-      .threshold(128) // Convert to black and white for better contrast
-      .toBuffer();
-  } catch (error) {
-    console.error('Image preprocessing error:', error);
-    return imageBuffer;
-  }
+// Group OCR lines into per-book candidates using bounding-box proximity.
+// Lines close together (title + author stacked on one spine/cover) get merged;
+// lines far apart (different spines, or the same shelf shot at different photo
+// angles) stay separate. Lines from different rotation passes are never mixed
+// together since their bounding boxes live in different coordinate frames.
+const heightOf = (bbox) => bbox.y1 - bbox.y0;
+
+// Distance between the nearest edges of two boxes along one axis (0 if they overlap).
+const axisGap = (aMin, aMax, bMin, bMax) => {
+  if (aMax < bMin) return bMin - aMax;
+  if (bMax < aMin) return aMin - bMax;
+  return 0;
 };
 
-// Extract text from image using Tesseract OCR
-export const extractTextFromImage = async (imageBuffer) => {
-  try {
-    // Preprocess image for better OCR
-    const processedImage = await preprocessImage(imageBuffer);
+// Edge-to-edge distance between two bounding boxes. Unlike center-to-center
+// distance, this doesn't get inflated when one line (e.g. a large title) is
+// much taller than the other (e.g. a smaller author line) sitting right below it.
+const boxDistance = (a, b) => {
+  const dx = axisGap(a.x0, a.x1, b.x0, b.x1);
+  const dy = axisGap(a.y0, a.y1, b.y0, b.y1);
+  return Math.hypot(dx, dy);
+};
 
-    // Perform OCR with improved settings
-    const { data: { text } } = await Tesseract.recognize(
-      processedImage,
-      'eng',
-      {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
-          }
-        },
-        // Optimize for book spines
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,&-:\'',
-      }
-    );
+export const groupLinesIntoCandidates = (lines) => {
+  if (lines.length === 0) return [];
 
-    console.log('OCR Extracted Text:', text);
-    return text;
-  } catch (error) {
-    console.error('OCR error:', error);
-    throw new Error('Failed to extract text from image');
+  const byRotation = new Map();
+  for (const line of lines) {
+    if (!byRotation.has(line.rotation)) byRotation.set(line.rotation, []);
+    byRotation.get(line.rotation).push(line);
   }
+
+  const groups = [];
+  for (const rotationLines of byRotation.values()) {
+    const avgHeight = rotationLines.reduce((sum, l) => sum + heightOf(l.bbox), 0) / rotationLines.length;
+    const threshold = avgHeight * 1.5;
+
+    const parent = rotationLines.map((_, i) => i);
+    const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const union = (a, b) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+
+    for (let i = 0; i < rotationLines.length; i++) {
+      for (let j = i + 1; j < rotationLines.length; j++) {
+        const dist = boxDistance(rotationLines[i].bbox, rotationLines[j].bbox);
+        if (dist <= threshold) union(i, j);
+      }
+    }
+
+    const clustered = new Map();
+    rotationLines.forEach((line, i) => {
+      const root = find(i);
+      if (!clustered.has(root)) clustered.set(root, []);
+      clustered.get(root).push(line);
+    });
+
+    for (const groupLines of clustered.values()) {
+      groupLines.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
+      groups.push({
+        lines: groupLines.map(l => l.text),
+        text: groupLines.map(l => l.text).join('\n'),
+        confidence: groupLines.reduce((sum, l) => sum + l.confidence, 0) / groupLines.length,
+      });
+    }
+  }
+
+  return groups;
+};
+
+// Drop candidates that are near-duplicates of one another (the same spine can
+// get picked up in more than one rotation pass) before spending Google Books
+// API quota on them. Compares as a bag of words rather than a raw substring
+// because line order within a candidate can vary between rotation passes
+// (e.g. near-tied bounding box coordinates can sort title/author either way).
+const tokenize = (text) => new Set(
+  text.toLowerCase().replace(/[^a-z0-9\s]+/g, ' ').split(/\s+/).filter((t) => t.length > 0)
+);
+
+const isNearDuplicate = (tokensA, tokensB) => {
+  if (tokensA.size === 0 || tokensB.size === 0) return false;
+  const [smaller, larger] = tokensA.size <= tokensB.size ? [tokensA, tokensB] : [tokensB, tokensA];
+  let overlap = 0;
+  for (const token of smaller) if (larger.has(token)) overlap += 1;
+  return overlap / smaller.size >= 0.7;
+};
+
+export const dedupeCandidates = (candidates) => {
+  const kept = [];
+  for (const candidate of candidates.sort((a, b) => b.confidence - a.confidence)) {
+    const tokens = tokenize(candidate.text);
+    if (tokens.size === 0) continue;
+    const isDupe = kept.some((k) => isNearDuplicate(tokens, k.tokens));
+    if (!isDupe) kept.push({ ...candidate, tokens });
+  }
+  return kept.map(({ tokens, ...candidate }) => candidate);
 };
 
 // Extract potential book titles and ISBNs from OCR text
@@ -161,41 +210,60 @@ export const parseBookInfoFromText = (text) => {
   return bookInfo;
 };
 
-// Scan shelf image and identify books
+// Search for a single candidate (one detected book) using its ISBN if present,
+// otherwise its likely title/author lines. Returns at most one match so a
+// single spine doesn't crowd out the other books in the photo.
+const searchCandidate = async (candidate) => {
+  const bookInfo = parseBookInfoFromText(candidate.text);
+
+  for (const isbn of bookInfo.potentialISBNs.slice(0, 2)) {
+    try {
+      const books = await searchByISBN(isbn);
+      if (books.length > 0) return books[0];
+    } catch (error) {
+      console.error(`Failed to search ISBN ${isbn}:`, error.message);
+    }
+  }
+
+  // Book spines/covers most commonly print title then author as consecutive
+  // lines - try that pairing before falling back to title-only.
+  const titleGuess = candidate.lines[0];
+  const authorGuess = candidate.lines[1] || bookInfo.potentialAuthors[0] || '';
+
+  if (authorGuess) {
+    try {
+      const books = await searchByTitleAuthor(titleGuess, authorGuess);
+      if (books.length > 0) return books[0];
+    } catch (error) {
+      console.error(`Failed to search "${titleGuess}" by "${authorGuess}":`, error.message);
+    }
+  }
+
+  try {
+    const books = await searchByTitleAuthor(titleGuess);
+    if (books.length > 0) return books[0];
+  } catch (error) {
+    console.error(`Failed to search title "${titleGuess}":`, error.message);
+  }
+
+  return null;
+};
+
+// Scan an image (single cover, single spine, or a shelf of many spines) and
+// identify every book it can find. Each detected text cluster is searched
+// independently so multiple books in one photo are each matched separately.
 export const scanShelfImage = async (imageBuffer) => {
   try {
-    // Extract text from image
-    const extractedText = await extractTextFromImage(imageBuffer);
-    
-    // Parse book information
-    const bookInfo = parseBookInfoFromText(extractedText);
-    
-    // Search for books based on extracted information
-    const foundBooks = [];
-    
-    // First, try ISBNs (most reliable)
-    for (const isbn of bookInfo.potentialISBNs.slice(0, 5)) {
-      try {
-        const books = await searchByISBN(isbn);
-        if (books.length > 0) {
-          foundBooks.push(...books);
-        }
-      } catch (error) {
-        console.error(`Failed to search ISBN ${isbn}:`, error.message);
-      }
-    }
+    const { fullText, lines } = await recognizeImage(imageBuffer);
 
-    // Then try titles (less reliable, limit to avoid API quota)
-    for (const title of bookInfo.potentialTitles.slice(0, 3)) {
-      try {
-        const books = await searchByTitleAuthor(title);
-        if (books.length > 0) {
-          // Add only the first result to avoid duplicates
-          foundBooks.push(books[0]);
-        }
-      } catch (error) {
-        console.error(`Failed to search title "${title}":`, error.message);
-      }
+    const rawCandidates = groupLinesIntoCandidates(lines);
+    // Cap how many candidates we search per scan to bound Google Books API usage.
+    const candidates = dedupeCandidates(rawCandidates).slice(0, 15);
+
+    const foundBooks = [];
+    for (const candidate of candidates) {
+      const book = await searchCandidate(candidate);
+      if (book) foundBooks.push(book);
     }
 
     // Remove duplicates based on ISBN or title
@@ -204,22 +272,21 @@ export const scanShelfImage = async (imageBuffer) => {
     const seenTitles = new Set();
 
     for (const book of foundBooks) {
-      const identifier = book.isbn13 || book.isbn || book.title;
       if (book.isbn13 && !seenISBNs.has(book.isbn13)) {
         seenISBNs.add(book.isbn13);
         uniqueBooks.push(book);
       } else if (book.isbn && !seenISBNs.has(book.isbn)) {
         seenISBNs.add(book.isbn);
         uniqueBooks.push(book);
-      } else if (!seenTitles.has(book.title)) {
+      } else if (!book.isbn13 && !book.isbn && !seenTitles.has(book.title)) {
         seenTitles.add(book.title);
         uniqueBooks.push(book);
       }
     }
 
     return {
-      extractedText,
-      bookInfo,
+      extractedText: fullText,
+      candidatesDetected: candidates.length,
       books: uniqueBooks,
       booksFound: uniqueBooks.length,
     };

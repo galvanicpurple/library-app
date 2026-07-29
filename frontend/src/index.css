@@ -39,6 +39,7 @@ code {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Utility classes */
@@ -136,6 +137,26 @@ code {
 .error {
   color: var(--danger);
   font-size: 13px;
+  margin-top: 4px;
+}
+
+.form-error {
+  background-color: #fee2e2;
+  border: 1px solid var(--danger);
+  color: #991b1b;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.input-error {
+  border-color: var(--danger);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--text-secondary);
   margin-top: 4px;
 }
 

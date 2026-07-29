@@ -15,26 +15,29 @@ const Login = () => {
     password: '',
   });
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState('');
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (formError) setFormError('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError('');
     setLoading(true);
 
     try {
       const response = await authAPI.login(formData);
       const { user, token } = response.data;
-      
+
       setAuth(user, token);
       toast.success('Login successful!');
       navigate('/dashboard');
     } catch (error) {
       console.error('Login error:', error);
       const message = error.response?.data?.error || 'Login failed';
-      toast.error(message);
+      setFormError(message);
     } finally {
       setLoading(false);
     }
@@ -50,6 +53,8 @@ const Login = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
+          {formError && <div className="form-error">{formError}</div>}
+
           <div className="form-group">
             <label htmlFor="email" className="label">
               <FaEnvelope /> Email
