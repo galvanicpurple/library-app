@@ -12,7 +12,12 @@ const SPINE_ROTATIONS = [90, 270];
 
 // Bounds worst-case scan time. Each spine costs up to two OCR passes, so a
 // densely packed shelf photo would otherwise run for minutes.
-const MAX_SPINES = 12;
+//
+// A real 15-book shelf photo hit the previous cap of 12 and silently dropped
+// three books, so this needs headroom over a realistic shelf. It is still a
+// cap, not a solution: the durable fix for long scans is to run them as a
+// background job rather than inside the request.
+const MAX_SPINES = 24;
 
 // How many spines to try both rotations on before settling on whichever
 // direction the shelf's titles actually run.
@@ -89,12 +94,14 @@ const runPass = async (worker, imageBuffer, rotateDeg, groupKey, label) => {
     `OCR ${label}: confidence=${data.confidence?.toFixed(1)}, `
     + `words=${wordCount}, lines=${data.lines?.length || 0}, score=${score.toFixed(1)}`
   );
-  // High confidence with zero words means Tesseract found a text-shaped region
-  // but couldn't decode any characters from it - usually a photo-quality issue
-  // (blur, glare, extreme angle), not a code bug. Logged explicitly so it isn't
-  // mistaken for the pipeline silently failing.
-  if (data.confidence > 50 && wordCount === 0) {
-    console.warn(`OCR ${label}: high confidence but no words decoded - likely a blurry/low-quality region`);
+  // A zero score means nothing alphanumeric came out, however confident
+  // Tesseract claims to be - it found text-shaped marks but couldn't resolve
+  // them into characters. On a correctly cropped spine this means the text is
+  // physically too small or too soft in the source photo, not a code fault.
+  // Checked via score rather than word count because Tesseract will happily
+  // report one "word" of pure punctuation.
+  if (score === 0 && data.confidence > 50) {
+    console.warn(`OCR ${label}: no readable characters - spine text is likely too small or blurry in the source image`);
   }
 
   const lines = (data.lines || [])
