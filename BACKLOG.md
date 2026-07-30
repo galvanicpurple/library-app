@@ -115,11 +115,51 @@ review of what actually works end to end before extending.
 ### 12. Rename the app
 "LibraryApp" is a placeholder. Flagged as low priority from the start.
 
+### 13. Manual book entry
+For rare or niche books that no online database can identify — currently the
+only ways into the library are scanning and Google Books search, so an
+unfindable book cannot be catalogued at all.
+
+**This is frontend-only work.** `POST /api/books` already accepts everything
+needed (title, subtitle, authors, publisher, publishedDate, description,
+pageCount, categories, language, imageUrl, isbn, isbn13, shelfId,
+acquisitionDate, condition, notes) and `validateBook` requires only `title` —
+ISBN and authors are optional. It was exercised directly during testing and
+works. What is missing is a form, plus an entry point on the Library page.
+
+One caveat to handle: `addBook` matches existing catalogue entries with
+`WHERE isbn = $1 OR title = $2`. A manually entered book has no ISBN, and
+`NULL = NULL` is never true in SQL, so it falls through to matching on title
+alone — meaning two genuinely different books sharing a title would be merged
+into one catalogue entry. Pre-existing, but manual entry makes it far more
+likely to bite, since obscure books have less distinctive titles and no ISBN
+to disambiguate.
+
+### 14. Favourite / star books, weighted into recommendations
+Partly groundwork already: `readings.rating` (1-5) exists, and the
+recommendation engine already treats `status = 'completed' AND rating >= 4` as
+its "favourite" signal when picking favourite authors and genres
+(`recommendationService.js`).
+
+Two design choices to make:
+
+- **Reuse rating vs. a separate flag.** Treating 5 stars as "favourite" needs
+  no schema change but conflates "rated highly after finishing" with "starred".
+  A separate `is_favorite` boolean is cleaner and lets you star a book you have
+  not read yet. Recommend the boolean, on `readings` — it is the user-to-book
+  table and already has `UNIQUE(user_id, book_id)`. Not `user_books`, which is
+  per-copy, so favouriting there would be ambiguous when you own two copies.
+- **The recommendation queries need relaxing.** They currently filter on
+  `status = 'completed'`, so starring an unread book would have no effect on
+  recommendations at all until it was finished. Favourites should count
+  regardless of reading status, and probably weigh more heavily than a 4-star
+  rating.
+
 ---
 
 ## Infrastructure
 
-### 13. Make scanning asynchronous
+### 15. Make scanning asynchronous
 Scanning currently blocks an HTTP request for 6-40 seconds. That is fragile on
 any host and gets worse as shelves get denser — `MAX_SPINES` is capped at 24
 purely to bound request time, which means a very dense shelf still silently
@@ -128,7 +168,7 @@ timeout failure class and makes the spine cap unnecessary.
 
 **This is the right fix for scan timeouts — not a faster host.**
 
-### 14. Hosting review (only if genuinely CPU-bound)
+### 16. Hosting review (only if genuinely CPU-bound)
 Railway is fine for now; the deploy stall seen on 29 July was an upstream
 GitHub issue, not Railway being slow. If OCR CPU becomes the real limit, the
 honest ranking is:
@@ -145,7 +185,7 @@ with no Railway-specific APIs. No lock-in.
 
 ## Housekeeping
 
-### 15. Debug scripts in `backend/`
+### 17. Debug scripts in `backend/`
 `test-google-api.js`, `test-ocr.js`, `test-segmentation.js` and
 `test-image.js` are all useful diagnostics but sit loose in the backend root
 and are not wired into `npm test`. Worth moving under `backend/tests/` and
