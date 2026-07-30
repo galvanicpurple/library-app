@@ -65,3 +65,43 @@
   justify-content: center;
   padding: 60px;
 }
+
+.library-book-card {
+  position: relative;
+}
+
+.remove-book-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 1;
+  transition: all 0.15s;
+}
+
+.remove-book-btn:hover:not(:disabled) {
+  background-color: var(--danger);
+  border-color: var(--danger);
+  color: white;
+}
+
+.remove-book-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.copy-count-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+}

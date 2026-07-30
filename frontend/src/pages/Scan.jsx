@@ -1,9 +1,20 @@
 import { useState, useEffect } from 'react';
-import { FaCamera, FaCheck, FaPlus } from 'react-icons/fa';
+import { FaCamera, FaCheck, FaPlus, FaExclamationCircle } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import CameraScanner from '../components/Camera/CameraScanner';
-import { scanAPI, shelvesAPI } from '../utils/api';
+import { scanAPI, shelvesAPI, booksAPI } from '../utils/api';
 import './Scan.css';
+
+// Identifiers used to check whether a scanned book is already in the
+// library: prefer ISBN (exact), fall back to a normalized title+author key
+// for books without one.
+const bookKey = (book) => {
+  const isbn = book.isbn13 || book.isbn;
+  if (isbn) return `isbn:${isbn}`;
+  const title = (book.title || '').toLowerCase().trim();
+  const author = (book.authors?.[0] || '').toLowerCase().trim();
+  return `title:${title}|${author}`;
+};
 
 const Scan = () => {
   const [showCamera, setShowCamera] = useState(false);
@@ -14,6 +25,7 @@ const Scan = () => {
   const [shelfId, setShelfId] = useState('');
   const [adding, setAdding] = useState(false);
   const [addedIndexes, setAddedIndexes] = useState(new Set());
+  const [ownedKeys, setOwnedKeys] = useState(new Set());
 
   useEffect(() => {
     shelvesAPI.getAll()
@@ -32,11 +44,16 @@ const Scan = () => {
       const formData = new FormData();
       formData.append('image', imageFile);
 
-      const response = await scanAPI.scanShelf(formData);
-      setResults(response.data);
-      setSelected(new Set(response.data.books.map((_, i) => i)));
+      const [scanResponse, libraryResponse] = await Promise.all([
+        scanAPI.scanShelf(formData),
+        booksAPI.getAll().catch(() => ({ data: { books: [] } })),
+      ]);
+
+      setResults(scanResponse.data);
+      setSelected(new Set(scanResponse.data.books.map((_, i) => i)));
       setAddedIndexes(new Set());
-      toast.success(`Found ${response.data.booksFound} books!`);
+      setOwnedKeys(new Set(libraryResponse.data.books.map(bookKey)));
+      toast.success(`Found ${scanResponse.data.booksFound} books!`);
     } catch (error) {
       console.error('Scan error:', error);
       toast.error('Failed to scan image');
@@ -128,18 +145,24 @@ const Scan = () => {
             {results.books.length > 0 && (
               <div className="scan-add-bar">
                 <div className="shelf-picker">
-                  <label className="label" htmlFor="shelf-select">Add to shelf (optional)</label>
+                  <label className="label" htmlFor="shelf-select">Assign to a shelf (optional)</label>
                   <select
                     id="shelf-select"
                     className="input"
                     value={shelfId}
                     onChange={(e) => setShelfId(e.target.value)}
                   >
-                    <option value="">No shelf</option>
+                    <option value="">Don&apos;t assign to a shelf</option>
                     {shelves.map((shelf) => (
                       <option key={shelf.id} value={shelf.id}>{shelf.name}</option>
                     ))}
                   </select>
+                  {shelves.length === 0 && (
+                    <small className="hint">
+                      Shelves group books by physical location (e.g. "Living Room Bookcase").
+                      Create one on the Shelves page if you'd like to organize by location.
+                    </small>
+                  )}
                 </div>
                 <button
                   className="btn btn-primary"
@@ -154,6 +177,7 @@ const Scan = () => {
             <div className="books-grid">
               {results.books.map((book, index) => {
                 const isAdded = addedIndexes.has(index);
+                const alreadyOwned = !isAdded && ownedKeys.has(bookKey(book));
                 return (
                   <div
                     key={index}
@@ -177,6 +201,11 @@ const Scan = () => {
                     {book.imageUrl && <img src={book.imageUrl} alt={book.title} />}
                     <h4>{book.title}</h4>
                     <p>{book.authors?.join(', ')}</p>
+                    {alreadyOwned && (
+                      <p className="already-owned-note">
+                        <FaExclamationCircle /> Already in your library - adding will save another copy
+                      </p>
+                    )}
                   </div>
                 );
               })}
