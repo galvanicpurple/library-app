@@ -7,18 +7,22 @@ priority within each section. Nothing here is in progress.
 
 ## Security / correctness
 
-### 1. Public test endpoints are unauthenticated (do this first)
-`backend/src/routes/test.js` mounts two routes with no auth and no rate limit,
-and they are live on the public Railway URL:
+### 1. Public test endpoints are unauthenticated — DONE (30 July 2026)
+`backend/src/routes/test.js` mounted two routes with no auth and no rate limit,
+live on the public Railway URL:
 
-- `POST /api/test/upload` — accepts file uploads from anyone and writes them to
-  disk. Restricted to images under 10MB, but with no rate limit and no auth,
-  someone could fill the disk.
-- `GET /api/test/google-books` — burns Google Books API quota on demand.
+- `POST /api/test/upload` — accepted file uploads from anyone and wrote them to
+  disk. Images under 10MB only, but with no rate limit and no auth, someone
+  could have filled the disk.
+- `GET /api/test/google-books` — burned Google Books API quota on demand.
 
-These were added for debugging (commit `018777e`) and have served their
-purpose. Delete them, or put them behind `authenticateToken` +
-`uploadLimiter` and gate on `NODE_ENV !== 'production'`.
+Both routes and their controller were deleted rather than gated: they were
+debugging aids from commit `018777e`, the frontend never called them, and
+their diagnostic value is now covered elsewhere (`/health` for liveness,
+explicit Google Books error logging for a bad API key, and `test-image.js`
+locally). Gating would have left unmaintained code on a public surface.
+
+Recoverable from git history if ever needed.
 
 ### 2. Uploaded scan images are stored on ephemeral disk
 `backend/src/middleware/upload.js` writes to `backend/uploads/`, and

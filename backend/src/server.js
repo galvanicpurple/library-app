@@ -8,7 +8,6 @@ import shelvesRoutes from './routes/shelves.js';
 import readingsRoutes from './routes/readings.js';
 import scanRoutes from './routes/scan.js';
 import recommendationsRoutes from './routes/recommendations.js';
-import testRoutes from './routes/test.js';
 
 // Load environment variables
 dotenv.config();
@@ -50,7 +49,6 @@ app.use('/api/shelves', shelvesRoutes);
 app.use('/api/readings', readingsRoutes);
 app.use('/api/scan', scanRoutes);
 app.use('/api/recommendations', recommendationsRoutes);
-app.use('/api/test', testRoutes);
 
 // 404 handler
 app.use((req, res) => {
