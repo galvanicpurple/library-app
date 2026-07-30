@@ -115,51 +115,58 @@ review of what actually works end to end before extending.
 ### 12. Rename the app
 "LibraryApp" is a placeholder. Flagged as low priority from the start.
 
-### 13. Manual book entry
-For rare or niche books that no online database can identify — currently the
-only ways into the library are scanning and Google Books search, so an
-unfindable book cannot be catalogued at all.
+### 13. Manual book entry — DONE (30 July 2026)
+Added a modal form on the Library page (title required, everything else
+optional) using the existing `POST /api/books`. Also fixed the dedupe bug
+this surfaced: `addBook` matched catalogue rows with `WHERE isbn = $1 OR
+title = $2`, and since `NULL = NULL` is never true in SQL, an ISBN-less
+manual entry fell through to matching on title alone — silently merging any
+two different books sharing a title. Verified: the same title+author
+submitted twice now correctly reuses the catalogue entry and flags
+`is_duplicate`; the same title with a different author gets its own entry.
 
-**This is frontend-only work.** `POST /api/books` already accepts everything
-needed (title, subtitle, authors, publisher, publishedDate, description,
-pageCount, categories, language, imageUrl, isbn, isbn13, shelfId,
-acquisitionDate, condition, notes) and `validateBook` requires only `title` —
-ISBN and authors are optional. It was exercised directly during testing and
-works. What is missing is a form, plus an entry point on the Library page.
+### 14. Reading status + star rating — DONE (30 July 2026)
+Turned out to be a prerequisite for favourites, not an optional nice-to-have:
+the recommendation engine has always required `readings.status = 'completed'
+AND rating >= 4`, but no UI anywhere could write a `readings` row — the
+frontend only ever called `readingsAPI.getStats()`. Recommendations, the
+Dashboard's reading counters, and any future favourites feature were all
+silently dead regardless of how much a user scanned in.
 
-One caveat to handle: `addBook` matches existing catalogue entries with
-`WHERE isbn = $1 OR title = $2`. A manually entered book has no ISBN, and
-`NULL = NULL` is never true in SQL, so it falls through to matching on title
-alone — meaning two genuinely different books sharing a title would be merged
-into one catalogue entry. Pre-existing, but manual entry makes it far more
-likely to bite, since obscure books have less distinctive titles and no ISBN
-to disambiguate.
+Added a status dropdown (want to read / reading / completed / abandoned) and
+a 1-5 star rating to each Library card. This surfaced a real pre-existing
+backend bug: `updateReading` could never have succeeded, on either this
+session's code or before it. Postgres unifies a parameter's type across every
+occurrence in one statement, and the status parameter was used both
+positionally into a `varchar` column and inside text comparisons in the same
+query — rejected with `42P08 inconsistent types deduced for parameter`.
+Fixed by casting consistently everywhere, not just in the comparisons (the
+first attempted fix was still wrong for exactly that reason — worth knowing
+if this class of error resurfaces elsewhere).
 
-### 14. Favourite / star books, weighted into recommendations
-Partly groundwork already: `readings.rating` (1-5) exists, and the
-recommendation engine already treats `status = 'completed' AND rating >= 4` as
-its "favourite" signal when picking favourite authors and genres
-(`recommendationService.js`).
+Verified via the actual browser UI end-to-end, not just curl: set a status,
+rate a book, un-rate it (confirmed the clear persists in the database, not
+just the display — `rating: 0` from clicking a filled star was silently
+being dropped from the request rather than sent as an explicit clear, a bug
+in the new frontend code caught by the same test), untrack a book, and
+confirmed the exact favourite-author query the recommendation engine
+depends on now returns real data after rating a book.
 
-Two design choices to make:
-
-- **Reuse rating vs. a separate flag.** Treating 5 stars as "favourite" needs
-  no schema change but conflates "rated highly after finishing" with "starred".
-  A separate `is_favorite` boolean is cleaner and lets you star a book you have
-  not read yet. Recommend the boolean, on `readings` — it is the user-to-book
-  table and already has `UNIQUE(user_id, book_id)`. Not `user_books`, which is
-  per-copy, so favouriting there would be ambiguous when you own two copies.
-- **The recommendation queries need relaxing.** They currently filter on
-  `status = 'completed'`, so starring an unread book would have no effect on
-  recommendations at all until it was finished. Favourites should count
-  regardless of reading status, and probably weigh more heavily than a 4-star
-  rating.
+### 15. Favourite / star flag, distinct from a 1-5 rating
+What #14 deliberately did *not* build: a boolean "favourite" independent of
+the star rating. The recommendation engine and UI now use a 1-5 rating
+(`status = 'completed' AND rating >= 4` counts as "favourite" for picking
+recommended authors/genres), which is what was actually requested and is
+simpler than adding a parallel flag. Revisit only if a rating turns out to
+not be expressive enough — e.g. wanting to flag a book as a favourite before
+finishing it, which the current design cannot do since rating requires a
+status.
 
 ---
 
 ## Infrastructure
 
-### 15. Make scanning asynchronous
+### 16. Make scanning asynchronous
 Scanning currently blocks an HTTP request for 6-40 seconds. That is fragile on
 any host and gets worse as shelves get denser — `MAX_SPINES` is capped at 24
 purely to bound request time, which means a very dense shelf still silently
@@ -168,7 +175,7 @@ timeout failure class and makes the spine cap unnecessary.
 
 **This is the right fix for scan timeouts — not a faster host.**
 
-### 16. Hosting review (only if genuinely CPU-bound)
+### 17. Hosting review (only if genuinely CPU-bound)
 Railway is fine for now; the deploy stall seen on 29 July was an upstream
 GitHub issue, not Railway being slow. If OCR CPU becomes the real limit, the
 honest ranking is:
@@ -185,7 +192,7 @@ with no Railway-specific APIs. No lock-in.
 
 ## Housekeeping
 
-### 17. Debug scripts in `backend/`
+### 18. Debug scripts in `backend/`
 `test-google-api.js`, `test-ocr.js`, `test-segmentation.js` and
 `test-image.js` are all useful diagnostics but sit loose in the backend root
 and are not wired into `npm test`. Worth moving under `backend/tests/` and
