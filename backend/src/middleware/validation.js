@@ -104,8 +104,11 @@ export const validateReading = [
   body('status')
     .isIn(['want_to_read', 'currently_reading', 'completed', 'abandoned'])
     .withMessage('Invalid reading status'),
+  // nullable (not just optional): null is a meaningful value here - "clear
+  // the rating" - and must reach the controller distinguishable from the
+  // field being omitted ("leave the rating as it is").
   body('rating')
-    .optional()
+    .optional({ nullable: true })
     .isInt({ min: 1, max: 5 })
     .withMessage('Rating must be between 1 and 5'),
   handleValidationErrors

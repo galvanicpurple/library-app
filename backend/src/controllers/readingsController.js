@@ -93,7 +93,14 @@ export const getReadingStats = async (req, res) => {
 export const updateReading = async (req, res) => {
   try {
     const { bookId } = req.params;
-    const { status, rating, review, currentPage } = req.body;
+    const { status, review, currentPage } = req.body;
+
+    // Distinguish "rating not sent" (leave whatever is stored alone) from
+    // "rating sent as null" (clear it) - COALESCE can express the former but
+    // has no way to express the latter, since COALESCE(NULL, rating) also
+    // just keeps the existing value.
+    const ratingProvided = Object.prototype.hasOwnProperty.call(req.body, 'rating');
+    const rating = ratingProvided ? req.body.rating : null;
 
     // Check if book exists in user's library
     const bookCheck = await query(
@@ -113,37 +120,45 @@ export const updateReading = async (req, res) => {
 
     let result;
 
+    // Postgres unifies the type of every occurrence of a given parameter
+    // placeholder across the whole statement. $3/$1 here is used both
+    // positionally (into the `status varchar(50)` column) and inside string
+    // comparisons (which infer `text`), and without a cast on *every*
+    // occurrence - not just the comparisons - it rejects the statement with
+    // 42P08 "inconsistent types deduced for parameter".
     if (existingReading.rows.length === 0) {
       // Create new reading record
       result = await query(
         `INSERT INTO readings (user_id, book_id, status, rating, review, current_page, started_at, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 
-           CASE WHEN $3 IN ('currently_reading', 'completed') THEN CURRENT_TIMESTAMP ELSE NULL END,
-           CASE WHEN $3 = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END
+         VALUES ($1, $2, $3::varchar, $4, $5, $6,
+           CASE WHEN $3::varchar IN ('currently_reading', 'completed') THEN CURRENT_TIMESTAMP ELSE NULL END,
+           CASE WHEN $3::varchar = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END
          )
          RETURNING *`,
         [req.user.id, bookId, status, rating, review, currentPage]
       );
     } else {
-      // Update existing reading record
+      // Update existing reading record. rating uses an explicit CASE on
+      // ratingProvided rather than COALESCE($2, rating), because COALESCE
+      // cannot express "set it to NULL" - it would just keep the old value.
       result = await query(
         `UPDATE readings
-         SET status = COALESCE($1, status),
-             rating = COALESCE($2, rating),
+         SET status = COALESCE($1::varchar, status),
+             rating = CASE WHEN $7::boolean THEN $2 ELSE rating END,
              review = COALESCE($3, review),
              current_page = COALESCE($4, current_page),
-             started_at = CASE 
-               WHEN $1 IN ('currently_reading', 'completed') AND started_at IS NULL 
-               THEN CURRENT_TIMESTAMP 
-               ELSE started_at 
+             started_at = CASE
+               WHEN $1::varchar IN ('currently_reading', 'completed') AND started_at IS NULL
+               THEN CURRENT_TIMESTAMP
+               ELSE started_at
              END,
-             completed_at = CASE 
-               WHEN $1 = 'completed' THEN CURRENT_TIMESTAMP 
-               ELSE completed_at 
+             completed_at = CASE
+               WHEN $1::varchar = 'completed' THEN CURRENT_TIMESTAMP
+               ELSE completed_at
              END
          WHERE user_id = $5 AND book_id = $6
          RETURNING *`,
-        [status, rating, review, currentPage, req.user.id, bookId]
+        [status, rating, review, currentPage, req.user.id, bookId, ratingProvided]
       );
     }
 

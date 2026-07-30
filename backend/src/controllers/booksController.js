@@ -102,11 +102,22 @@ export const addBook = async (req, res) => {
     } = req.body;
 
     await transaction(async (client) => {
-      // Check if book exists in master catalog
-      let bookResult = await client.query(
-        'SELECT id FROM books WHERE isbn = $1 OR title = $2',
-        [isbn, title]
-      );
+      // Reuse an existing catalogue entry only on strong evidence. Matching on
+      // title alone merged genuinely different books that happen to share one,
+      // which manually entered books hit often - obscure titles are less
+      // distinctive and carry no ISBN to tell them apart.
+      const bookResult = (isbn || isbn13)
+        ? await client.query(
+          `SELECT id FROM books
+           WHERE (isbn IS NOT NULL AND isbn = $1)
+              OR (isbn13 IS NOT NULL AND isbn13 = $2)
+           LIMIT 1`,
+          [isbn || null, isbn13 || null]
+        )
+        : await client.query(
+          'SELECT id FROM books WHERE title = $1 AND authors = $2 LIMIT 1',
+          [title, authors || null]
+        );
 
       let bookId;
 
