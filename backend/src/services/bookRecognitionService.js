@@ -230,23 +230,65 @@ const significantTokens = (text) => (
   (text.toLowerCase().match(/[a-z]{4,}/g) || []).filter((w) => !STOPWORDS.has(w))
 );
 
-const isRelevantMatch = (queryText, book) => {
-  const queryTokens = new Set(significantTokens(queryText));
-  if (queryTokens.size === 0) return true; // nothing distinctive to check against
-  const bookTokens = significantTokens(`${book.title || ''} ${book.subtitle || ''} ${(book.authors || []).join(' ')}`);
-  return bookTokens.some((t) => queryTokens.has(t));
+// An author match counts for much more than a title match. It is the signal
+// that separates a work from the books written *about* that work: scanning a
+// Dune spine turns up both "Dune" by Frank Herbert and "Frank Herbert's Dune:
+// A Critical Companion" by Kara Kennedy, and only the first agrees on author.
+const AUTHOR_WEIGHT = 3;
+
+// Each word in the title that the scan didn't see dilutes the match, so
+// "Dune" beats "Frank Herbert's Dune: A Critical Companion" even though both
+// contain the scanned words.
+const EXTRA_TITLE_WORD_PENALTY = 0.3;
+
+const scoreCandidate = (queryTokens, book) => {
+  const titleTokens = new Set(significantTokens(`${book.title || ''} ${book.subtitle || ''}`));
+  const authorTokens = new Set(significantTokens((book.authors || []).join(' ')));
+
+  let titleHits = 0;
+  let authorHits = 0;
+  for (const token of queryTokens) {
+    if (titleTokens.has(token)) titleHits += 1;
+    if (authorTokens.has(token)) authorHits += 1;
+  }
+
+  // Sharing nothing at all with the scan means this is not the book, however
+  // highly Google ranked it.
+  if (titleHits === 0 && authorHits === 0) return 0;
+
+  const unmatchedTitleWords = Math.max(0, titleTokens.size - titleHits);
+  return (titleHits + authorHits * AUTHOR_WEIGHT)
+    / (1 + unmatchedTitleWords * EXTRA_TITLE_WORD_PENALTY);
 };
 
-// Among the results that actually match, prefer one with a cover image over
-// one without. Deliberately does NOT re-sort by date - Google's own
-// relevance ranking is what keeps the actual right book on top; sorting by
-// "most recent" instead would readily promote an unrelated but newer title
-// (e.g. a 2025 commentary book like "Potter Stinks" outranking the actual
-// Harry Potter novel just for being newer).
+// Picks the result that best corresponds to what was actually scanned.
+//
+// Deliberately does NOT re-sort by date - sorting by "most recent" was tried
+// and reverted, since it promoted unrelated-but-newer titles (a 2025
+// commentary book outranking the Harry Potter novel it discusses). Ties keep
+// Google's own relevance order, with a cover image as the final tiebreak.
 const pickBestMatch = (queryText, books) => {
-  const relevant = books.filter((b) => isRelevantMatch(queryText, b));
-  if (relevant.length === 0) return null;
-  return relevant.find((b) => b.imageUrl) || relevant[0];
+  const queryTokens = new Set(significantTokens(queryText));
+
+  // Nothing distinctive to verify against - typically OCR garbage such as an
+  // upside-down title read off the wrong rotation. Returning a match here
+  // means inventing one, which is how a scan of three novels picked up a
+  // fourth, unrelated book.
+  if (queryTokens.size === 0) return null;
+
+  const scored = books
+    .map((book, index) => ({ book, index, score: scoreCandidate(queryTokens, book) }))
+    .filter((entry) => entry.score > 0);
+
+  if (scored.length === 0) return null;
+
+  scored.sort((a, b) => (
+    b.score - a.score
+    || (b.book.imageUrl ? 1 : 0) - (a.book.imageUrl ? 1 : 0)
+    || a.index - b.index
+  ));
+
+  return scored[0].book;
 };
 
 // Search for a single candidate (one detected book) using its ISBN if present,

@@ -6,3 +6,6 @@ uploads/
 dist/
 coverage/
 *.traineddata
+
+# Spine crops written by `node test-image.js --save-crops`
+crops/
