@@ -241,20 +241,44 @@ const AUTHOR_WEIGHT = 3;
 // contain the scanned words.
 const EXTRA_TITLE_WORD_PENALTY = 0.3;
 
+// One shared word is thin evidence, and on a partly-readable shelf it is
+// where the confident-but-wrong answers come from: a spine that OCR'd as only
+// "JONATHAN" matched "The Correspondence of Jonathan Worth", and "STARLAND"
+// matched "Star Darlings: A Wisher's Guide to Starland". Neither book was on
+// the shelf. A silent wrong book in the library is worse than a miss, so two
+// corroborating words are required.
+const MIN_MATCHED_TOKENS = 2;
+
+// The exception: plenty of real books genuinely are one word ("Dune",
+// "Emma"). A lone match still counts when it accounts for the entire title
+// and the scan didn't read much else - which is a near-exact title match,
+// not a passing mention of a common word inside a longer title.
+const isExactShortTitleMatch = (queryTokens, titleTokens, matched) => (
+  matched === 1 && titleTokens.size === 1 && queryTokens.size <= 2
+);
+
 const scoreCandidate = (queryTokens, book) => {
   const titleTokens = new Set(significantTokens(`${book.title || ''} ${book.subtitle || ''}`));
   const authorTokens = new Set(significantTokens((book.authors || []).join(' ')));
 
   let titleHits = 0;
   let authorHits = 0;
+  let matched = 0;
   for (const token of queryTokens) {
-    if (titleTokens.has(token)) titleHits += 1;
-    if (authorTokens.has(token)) authorHits += 1;
+    const inTitle = titleTokens.has(token);
+    const inAuthor = authorTokens.has(token);
+    if (inTitle) titleHits += 1;
+    if (inAuthor) authorHits += 1;
+    if (inTitle || inAuthor) matched += 1;
   }
 
   // Sharing nothing at all with the scan means this is not the book, however
   // highly Google ranked it.
-  if (titleHits === 0 && authorHits === 0) return 0;
+  if (matched === 0) return 0;
+
+  if (matched < MIN_MATCHED_TOKENS && !isExactShortTitleMatch(queryTokens, titleTokens, matched)) {
+    return 0;
+  }
 
   const unmatchedTitleWords = Math.max(0, titleTokens.size - titleHits);
   return (titleHits + authorHits * AUTHOR_WEIGHT)
