@@ -9,3 +9,6 @@ coverage/
 
 # Spine crops written by `node test-image.js --save-crops`
 crops/
+
+# Real-photo test images (stock photos, not ours to redistribute via git)
+test-images/

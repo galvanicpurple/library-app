@@ -14,9 +14,9 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
-import { segmentSpines } from './src/services/ocr/spineSegmentation.js';
-import { recognizeImage } from './src/services/ocr/index.js';
-import { scanShelfImage } from './src/services/bookRecognitionService.js';
+import { segmentSpines } from '../src/services/ocr/spineSegmentation.js';
+import { recognizeImage } from '../src/services/ocr/index.js';
+import { scanShelfImage } from '../src/services/bookRecognitionService.js';
 
 const imagePath = process.argv[2];
 const saveCrops = process.argv.includes('--save-crops');

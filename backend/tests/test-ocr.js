@@ -14,7 +14,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import sharp from 'sharp';
-import { scanShelfImage } from './src/services/bookRecognitionService.js';
+import { scanShelfImage } from '../src/services/bookRecognitionService.js';
 
 async function makeCoverImage({ fontSize = 60, width = 900, height = 300, fg = 'black', bg = 'white' } = {}) {
   const svg = `

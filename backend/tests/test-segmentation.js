@@ -6,7 +6,7 @@
 // Run with: node test-segmentation.js
 
 import sharp from 'sharp';
-import { segmentSpines } from './src/services/ocr/spineSegmentation.js';
+import { segmentSpines } from '../src/services/ocr/spineSegmentation.js';
 
 // One spine: a coloured vertical block with its title running bottom-to-top.
 async function makeSpine({ title, author, width, height, bg, fg }) {
