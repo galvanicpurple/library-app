@@ -1,9 +1,16 @@
 # Backlog
 
-Deferred and nice-to-have items, captured 30 July 2026. Active work is
-ordered roughly by priority within each section below. Resolved items
-(fully done, decided-and-closed, or deliberately deprioritized) are kept in
-their own section at the end for reference, not deleted.
+The live, ordered work plan for this project. Started 30 July 2026, last
+updated 31 July 2026. Active work is grouped by theme below and ordered
+roughly by priority within each section. Once an item is fully done,
+decided-and-closed, or deliberately deprioritized, it moves to the
+"Completed / Resolved" section at the end - kept there for context, not
+deleted, so later sessions can see *why* a decision was made, not just that
+it was.
+
+**New to this file?** Start with CLAUDE.md instead - it explains the app
+itself and points back here for what to work on next. This file assumes
+you've already read that.
 
 ---
 
@@ -34,183 +41,9 @@ correct on a 900x600 photo) is out of date — item 14's full-resolution
 re-test (see Completed / Resolved below) settled the open question:
 segmentation turned out not to be uniformly "working well" (it fails on
 adjacent low-contrast spines), and OCR/Tesseract itself, not resolution, is
-the confirmed dominant failure. Item 2 below is what that determined.
-
-### 2. OCR provider decision: self-hosted open-source, not Cloud Vision — DECIDED (30 July 2026)
-Cloud Vision was the original fallback plan (see git history for the old
-text of this item) but is ruled out: it requires sending personal photos to
-Google, which is a hard no on privacy grounds, separate from and in addition
-to the cost question.
-
-Decided instead: replace Tesseract with a self-hosted open-source OCR engine
-trained on **scene text** (text photographed on real-world objects) rather
-than scanned documents — **EasyOCR** or **PaddleOCR**. This lines up directly
-with item 14's findings: decorative backgrounds and stylized display fonts are
-normal scene-text territory, not document territory, which is exactly what
-broke Tesseract. Leaning EasyOCR first: pure PyTorch, straightforward
-install, better-supported on Windows than PaddleOCR's PaddlePaddle framework
-(relevant since local dev is Windows). The provider abstraction in
-`backend/src/services/ocr/` still applies — same `{ fullText, lines }` shape.
-
-Phased plan:
-1. **Validate** EasyOCR (and PaddleOCR if needed) as a standalone script
-   against the crops already saved from both item-14 test photos — no service,
-   no integration, just confirm it actually reads "The 500" and the Vanity
-   Fair spine before investing further. — **DONE (30 July 2026), see findings below.**
-2. **Minimal Python HTTP service** wrapping the chosen library. Superseded by
-   the item 12 pivot to Modal: this and step 4 collapsed into one - Modal's
-   own deployment model (a decorated Python function + `modal deploy`)
-   replaced "write a FastAPI/Flask service, then separately deploy it
-   somewhere." **DONE (30 July 2026)** - see `ocr-service/app.py` and
-   `ocr-service/README.md`.
-3. **New Node provider**, `backend/src/services/ocr/easyocrProvider.js`,
-   calling that service and matching the existing shape; `OCR_PROVIDER=easyocr`.
-   **DONE (30 July 2026)** - see findings below.
-4. **Deployment** — see item 12 (now Modal, not Oracle). **DONE (30 July
-   2026)** - deployed at
-   `https://galvanicpurple--libraryapp-ocr-ocrservice-recognize.modal.run`,
-   auth via a shared-secret `Authorization: Bearer` header checked against
-   the `ocr-service-token` Modal secret (matching value in `backend/.env` as
-   `OCR_SERVICE_TOKEN`).
-5. **Re-verify** with `npm run test:ocr`, `npm run test:segmentation`, and
-   both real photos from item 14 against the new provider; confirm the
-   two-corroborating-words matching logic still behaves correctly against
-   the new output shape. **DONE (30 July 2026)** - see findings below.
-
-**Steps 2-5 findings (30 July 2026):**
-
-Built `ocr-service/app.py`: a Modal `@app.cls` with `@modal.enter()` loading
-`easyocr.Reader(['en'], gpu=False)` once per container (not per request),
-and one `@modal.fastapi_endpoint(method="POST")` accepting raw image bytes
-and returning `{ lines: [{ text, confidence (0-100), bbox }] }`. Two real
-deploy-time bugs worth knowing if this file is ever touched again (both
-detailed with fixes in `ocr-service/README.md`): the endpoint's `request`
-parameter needs an explicit `request: Request` type annotation or Modal/
-FastAPI silently treats it as a required query parameter (every call 422s);
-and EasyOCR's bbox/confidence values are numpy scalar types, which
-`JSONResponse`'s stdlib `json.dumps` rejects outright unless cast to native
-`int`/`float` first.
-
-Built `backend/src/services/ocr/easyocrProvider.js`, mirroring
-tesseractProvider.js's shape but simpler in one real way: EasyOCR's
-`rotation_info=[90, 180, 270]` tries every orientation in a single call and
-maps rotated detections back onto the original crop's coordinate frame
-before returning them, so - unlike Tesseract - there's no need for a
-separate pass per rotation, and no "which rotation is winning" locking logic
-to carry over. Two design decisions made while building it, not pre-planned:
-
-- **Crops are downsized before upload** (1500px on the long edge, JPEG
-  quality 85). Full-resolution spine crops from a real 8000px+ shelf photo
-  can be 20-40MB each, which made a single request take 15-100+ seconds
-  (transfer + EasyOCR's own compute time on a huge image). Downsizing
-  measurably *improved* accuracy on a real test crop (the merged Sherlock
-  Holmes/Austen/Bronte region from item 14) rather than just speeding things
-  up, so this wasn't a quality/speed tradeoff.
-- **Spines are OCR'd with bounded concurrency (6 at a time)**, not
-  sequentially. Each Modal call is an independent stateless HTTP request,
-  unlike Tesseract's single in-process worker that genuinely could only do
-  one recognition at a time - so there's no reason to serialize these.
-
-One real bug caught during verification, not present in tesseractProvider.js
-because it has no env-dependent config: reading `process.env.OCR_SERVICE_URL`
-at module load time raced against `dotenv.config()` in the test scripts.
-ESM hoists all `import` statements above other top-level code, so
-`test-ocr.js`'s `import { scanShelfImage } ...` (which transitively imports
-easyocrProvider.js) actually ran before its own `dotenv.config()` call,
-leaving a module-level `const` pointed at `undefined`. Fixed by reading the
-config lazily, inside the functions that use it, instead of at module scope.
-
-**Verification results:**
-
-- `npm run test:segmentation` - unaffected, 5/5 pass (segmentation has no
-  OCR-provider dependency).
-- `npm run test:ocr` (synthetic images) - 2/4 pass with `OCR_PROVIDER=easyocr`.
-  Both cover-photo cases pass; both spine-image cases (which render as small,
-  ultra-clean vertical vector text via SVG) fail, reading garbage
-  (`"Rings"`, `"the"`, `"JO"`, `"Coxen"` instead of "The Lord of the Rings" /
-  "J.R.R. Tolkien"). Confirmed this is not an adapter bug: the same garbage
-  comes back calling EasyOCR directly on the raw, uncompressed PNG (no
-  resize/JPEG step involved), and upscaling the image 3x doesn't help either.
-  This is a genuine, expected difference between the two engines rather than
-  a regression - EasyOCR is a scene-text model tuned for real photographed
-  text, and these synthetic cases are exactly the opposite of that (crisp,
-  noise-free, machine-rendered), while Tesseract (document-OCR-oriented)
-  handles them natively. The synthetic suite was written against Tesseract's
-  strengths; it isn't a representative benchmark for a scene-text engine and
-  isn't being chased for parity here - the real target is real photos (see
-  below), which is what this whole migration was for.
-- `npm run test:image` against both real photos from item 14 -
-  **substantial, real improvement**, matching what Phase 0 predicted:
-  - The Penguin Clothbound Classics photo's merged decorative gold-foil
-    region (Sherlock Holmes/Jane Austen/Jane Eyre, the case Tesseract read
-    *nothing* off in item 14) now reads "COMPLETE SHERLOCK", "JANE",
-    "CHARLOTTE BRONTE", "AUSTEN", "BRONTE", "SEVEN NOVELS", "WUTHERING" -
-    real, legible fragments. End-to-end book matching found 3 books
-    (Charlotte Brontë biography, Jane Austen biography, Great Expectations)
-    from this photo - matched to biographies/companion volumes rather than
-    the actual novels in a couple of cases, a book-matching-layer ranking
-    nuance (same family of issue item 16 fixed a different instance of), not
-    an OCR problem, and out of scope for this migration.
-  - The plain-cover shelf photo (14-15 books) matched 5 books, including the
-    exact "Uncommon Service" case Phase 0 flagged as a real win (author
-    surnames "FREI"/"MORRISS" both read correctly) - now confirmed working
-    all the way through to a match, not just an isolated OCR reading. Also
-    correctly matched "The Spider Network" from badly fragmented OCR
-    ("Matn Genius," "Gang of", "Bankers", "Greatest Scams", "David") and
-    "Grasping the Grape".
-- **Timing**: total pipeline time for the 15-spine shelf photo was ~81s
-  (segmentation 0.8s, OCR stage ~26s with the concurrency/downsizing above,
-  Google Books matching ~54s - matching, not OCR, is now the dominant cost).
-  This doesn't resolve item 11 (make scanning async) - if anything it makes
-  that item more clearly necessary, since 80+ seconds in a single HTTP
-  request is well past comfortable request-timeout territory. Not a
-  regression from Tesseract (which was already the motivation for item 11),
-  but worth knowing this migration doesn't fix the timing problem, only the
-  accuracy one.
-
-**Not yet decided:** whether to flip `OCR_PROVIDER` to `easyocr` as the
-default (currently still `tesseract` in `backend/.env` and `.env.example`,
-opt-in via `OCR_PROVIDER=easyocr npm run test:...` during verification) and,
-if so, adding `OCR_PROVIDER`/`OCR_SERVICE_URL`/`OCR_SERVICE_TOKEN` to the
-Railway production environment. Deliberately left as a decision for the
-account owner rather than made unilaterally, since it changes live scan
-behavior and cost profile (Modal's free-tier credits) - see CLAUDE.md.
-
-**Step 1 findings (30 July 2026):** Tested EasyOCR locally (Python 3.12 +
-`pip install easyocr`, CPU-only, no Modal deployment needed for this step)
-against four spine crops already saved from the two real test photos -
-`rotation_info=[90, 180, 270]` handles the vertical-text detection in one
-call, unlike Tesseract's separate per-rotation passes:
-
-- A known-easy case ("Golf Is Where You Find It") read correctly, as
-  expected - sanity check passed.
-- "The 500" (bold stylized font, Tesseract: nothing) - partial improvement:
-  garbled title, but picked up fragments of the publisher imprint
-  ("REAG4N" ≈ Reagan Arthur). Not clean, but strictly better than nothing.
-- "Uncommon Service" (bold stylized font, Tesseract: nothing) - **real win**:
-  both author surnames read correctly and with high confidence - "FREI"
-  (0.92), "MORRISS" (0.99) - even though the title itself still garbled.
-  Likely enough for a correct match on its own, since two corroborating
-  author tokens at AUTHOR_WEIGHT's 3x weighting is exactly the matching
-  layer's strongest signal.
-- The Vanity Fair spine (decorative diamond-pattern background, Tesseract:
-  nothing) - **no improvement**: a few stray digits, no real text recovered.
-  Confirms the busy-decorative-background problem isn't Tesseract-specific -
-  it's a genuinely hard case for scene-text OCR generally, not just a
-  Tesseract limitation. EasyOCR is being carried forward anyway since it's
-  never worse than Tesseract and meaningfully better on the stylized-font
-  half of the failure set - the decorative-background half remains a known,
-  accepted limitation rather than something either engine tested so far solves.
-
-**Remaining effort estimate (given as of 30 July 2026, before step 3):**
-roughly half a day to a full day, concentrated in step 3. The main risk
-isn't the OCR quality (already validated above) - it's that EasyOCR returns
-quad bounding boxes and detects all rotation angles in a single call,
-structurally different from Tesseract's per-rotation rectangle+label output
-that `groupLinesIntoCandidates`'s bbox-proximity grouping currently depends
-on. The new provider needs to reshape Modal's response into the existing
-`{ fullText, lines }` contract carefully, not just swap which library
-produces the text.
+the confirmed dominant failure. Item 2, in Completed / Resolved below (the
+OCR engine was fully migrated and is now live in production), is what that
+determined.
 
 ### 3. Real-photo benchmark set
 10-20 photos of actual shelves (single spines, dense shelves, covers, good and
@@ -224,31 +57,8 @@ in `backend/test-images/` (gitignored — stock photos, not ours to
 redistribute). Still just 2 of the wanted 10-20, and there's no known-correct-
 answers file or automated scoring yet — this item is not done, just seeded.
 
-### 4. ISBN barcode scanning as a parallel capture mode — DONE (31 July 2026)
-Not a replacement for spine scanning — a complementary path. A barcode scan is
-near-100% accurate versus 13-70% for spine OCR, so for bulk-cataloguing a large
-collection it is by far the most reliable route. Client-side JS libraries
-(`@zxing/library`, `quagga2`) do this in-browser, so it needs no backend work.
-
-Built as a background decode loop inside the existing camera view
-(`useBarcodeScanner.js`, wrapping `@zxing/browser`'s `BrowserMultiFormatReader`)
-rather than a separate fourth method the user has to pick upfront - see item
-10 below for why. Confirmed no backend changes were needed: a detected ISBN
-is looked up via the already-working `scanAPI.searchExternal({ type: 'isbn' })`
-→ `searchByISBN` in `bookRecognitionService.js`, and added via the existing
-`scanAPI.batchAdd` with a 1-item array. Restricted to EAN-13/UPC-A formats so
-a decode only ever fires on an actual checksum-passing barcode, never on
-ordinary spine text.
-
-Not verified against a real physical barcode in this session - the
-sandboxed browser environment used for testing blocks real camera device
-access (`getUserMedia` returns `NotAllowedError` unconditionally), so the
-decode loop itself couldn't be exercised end-to-end here. The zxing API
-(constructor, `decodeFromVideoElement` callback shape) was verified directly
-against the library's own docs/source rather than assumed, and the rest of
-the camera/lifecycle wiring (start/stop on capture, camera switch, unmount)
-was verified by code review and a clean production build. Worth a real-device
-check the first time this is used for an actual scan.
+**This is currently the highest-leverage next step** if picking up this
+project with no other assignment - see CLAUDE.md's "Current state" section.
 
 ---
 
@@ -268,6 +78,17 @@ Shelves exist and can be created and assigned, but the original goal — suggest
 an optimal ordering, then tell you which shelf a book is on when you search —
 is only partly built (`backend/src/services/organizationService.js`). Worth a
 review of what actually works end to end before extending.
+
+### 20. No self-service "delete my account" option
+Found in passing (31 July 2026) while cleaning up a throwaway test account
+created to verify a production deploy: there's no API route or UI button
+for a user to delete their own account, only manual `DELETE FROM users`
+via direct database access. Low priority for the real user (nobody's asking
+for it), but a genuine gap, and it made routine test-account cleanup this
+session slower than it should be (had to go through Railway's dashboard
+data tab rather than a script or app feature). Worth adding if verification
+against production becomes a regular habit, or if account deletion is ever
+requested for real.
 
 ### 7. Rename the app
 "LibraryApp" is a placeholder. Flagged as low priority from the start.
@@ -355,6 +176,286 @@ Schema: needs a `series` + `volume_number` shape that `authors`/`isbn`/
 
 Estimated at 1-2 days once the shared scaffolding exists.
 
+---
+
+## Completed / Resolved
+
+Historical record of fully finished, decided-and-closed, or deliberately
+deprioritized work — nothing further planned. Kept for context and
+cross-references from active items above, not because there's further
+action here. Ordered by item number, not by date.
+
+### 2. OCR provider decision: self-hosted open-source, not Cloud Vision — DONE, LIVE IN PRODUCTION (31 July 2026)
+Cloud Vision was the original fallback plan (see git history for the old
+text of this item) but is ruled out: it requires sending personal photos to
+Google, which is a hard no on privacy grounds, separate from and in addition
+to the cost question.
+
+Decided instead: replace Tesseract with a self-hosted open-source OCR engine
+trained on **scene text** (text photographed on real-world objects) rather
+than scanned documents — **EasyOCR** or **PaddleOCR**. This lines up directly
+with item 14's findings: decorative backgrounds and stylized display fonts are
+normal scene-text territory, not document territory, which is exactly what
+broke Tesseract. Leaning EasyOCR first: pure PyTorch, straightforward
+install, better-supported on Windows than PaddleOCR's PaddlePaddle framework
+(relevant since local dev is Windows). The provider abstraction in
+`backend/src/services/ocr/` still applies — same `{ fullText, lines }` shape.
+
+Phased plan, all done:
+1. **Validate** EasyOCR as a standalone script against real spine crops -
+   confirm it actually reads real spines before investing further. **DONE**,
+   see "Step 1 findings" below.
+2. **Minimal Python HTTP service** wrapping EasyOCR. Superseded by the
+   hosting decision below (Modal): Modal's own deployment model (a decorated
+   Python function + `modal deploy`) replaced "write a FastAPI/Flask
+   service, then separately deploy it somewhere." **DONE** - see
+   `ocr-service/app.py` and `ocr-service/README.md`.
+3. **New Node provider**, `backend/src/services/ocr/easyocrProvider.js`,
+   calling that service and matching the existing shape;
+   `OCR_PROVIDER=easyocr`. **DONE** - see "Steps 2-5 findings" below.
+4. **Deployment** on Modal (a serverless Python host - see the hosting
+   comparison further down this entry for why Modal over other options).
+   **DONE** - deployed at
+   `https://galvanicpurple--libraryapp-ocr-ocrservice-recognize.modal.run`,
+   auth via a shared-secret `Authorization: Bearer` header checked against
+   the `ocr-service-token` Modal secret (matching value in `backend/.env` as
+   `OCR_SERVICE_TOKEN`).
+5. **Re-verify** with `npm run test:ocr`, `npm run test:segmentation`, and
+   real photos against the new provider; confirm the matching logic still
+   behaves correctly against the new output shape. **DONE** - see "Steps 2-5
+   findings" below.
+
+**Step 1 findings:** Tested EasyOCR locally (Python 3.12 + `pip install
+easyocr`, CPU-only, no deployment needed for this step) against four spine
+crops already saved from two real test photos -
+`rotation_info=[90, 180, 270]` handles the vertical-text detection in one
+call, unlike Tesseract's separate per-rotation passes:
+
+- A known-easy case ("Golf Is Where You Find It") read correctly, as
+  expected - sanity check passed.
+- "The 500" (bold stylized font, Tesseract: nothing) - partial improvement:
+  garbled title, but picked up fragments of the publisher imprint
+  ("REAG4N" ≈ Reagan Arthur). Not clean, but strictly better than nothing.
+- "Uncommon Service" (bold stylized font, Tesseract: nothing) - **real win**:
+  both author surnames read correctly and with high confidence - "FREI"
+  (0.92), "MORRISS" (0.99) - even though the title itself still garbled.
+  Likely enough for a correct match on its own, since two corroborating
+  author tokens at AUTHOR_WEIGHT's 3x weighting is exactly the matching
+  layer's strongest signal.
+- The Vanity Fair spine (decorative diamond-pattern background, Tesseract:
+  nothing) - **no improvement**: a few stray digits, no real text recovered.
+  Confirms the busy-decorative-background problem isn't Tesseract-specific -
+  it's a genuinely hard case for scene-text OCR generally, not just a
+  Tesseract limitation. EasyOCR is being carried forward anyway since it's
+  never worse than Tesseract and meaningfully better on the stylized-font
+  half of the failure set - the decorative-background half remains a known,
+  accepted limitation rather than something either engine tested so far solves.
+
+**Steps 2-5 findings:**
+
+Built `ocr-service/app.py`: a Modal `@app.cls` with `@modal.enter()` loading
+`easyocr.Reader(['en'], gpu=False)` once per container (not per request),
+and one `@modal.fastapi_endpoint(method="POST")` accepting raw image bytes
+and returning `{ lines: [{ text, confidence (0-100), bbox }] }`. Two real
+deploy-time bugs worth knowing if this file is ever touched again (both
+detailed with fixes in `ocr-service/README.md`): the endpoint's `request`
+parameter needs an explicit `request: Request` type annotation or Modal/
+FastAPI silently treats it as a required query parameter (every call 422s);
+and EasyOCR's bbox/confidence values are numpy scalar types, which
+`JSONResponse`'s stdlib `json.dumps` rejects outright unless cast to native
+`int`/`float` first.
+
+Built `backend/src/services/ocr/easyocrProvider.js`, mirroring
+tesseractProvider.js's shape but simpler in one real way: EasyOCR's
+`rotation_info=[90, 180, 270]` tries every orientation in a single call and
+maps rotated detections back onto the original crop's coordinate frame
+before returning them, so - unlike Tesseract - there's no need for a
+separate pass per rotation, and no "which rotation is winning" locking logic
+to carry over. Two design decisions made while building it, not pre-planned:
+
+- **Crops are downsized before upload** (1500px on the long edge, JPEG
+  quality 85). Full-resolution spine crops from a real 8000px+ shelf photo
+  can be 20-40MB each, which made a single request take 15-100+ seconds
+  (transfer + EasyOCR's own compute time on a huge image). Downsizing
+  measurably *improved* accuracy on a real test crop (the merged Sherlock
+  Holmes/Austen/Bronte region from item 14) rather than just speeding things
+  up, so this wasn't a quality/speed tradeoff.
+- **Spines are OCR'd with bounded concurrency (6 at a time)**, not
+  sequentially. Each Modal call is an independent stateless HTTP request,
+  unlike Tesseract's single in-process worker that genuinely could only do
+  one recognition at a time - so there's no reason to serialize these.
+
+One real bug caught during verification, not present in tesseractProvider.js
+because it has no env-dependent config: reading `process.env.OCR_SERVICE_URL`
+at module load time raced against `dotenv.config()` in the test scripts.
+ESM hoists all `import` statements above other top-level code, so
+`test-ocr.js`'s `import { scanShelfImage } ...` (which transitively imports
+easyocrProvider.js) actually ran before its own `dotenv.config()` call,
+leaving a module-level `const` pointed at `undefined`. Fixed by reading the
+config lazily, inside the functions that use it, instead of at module scope.
+(This same class of bug recurred later and more seriously - see below.)
+
+**Verification results:**
+
+- `npm run test:segmentation` - unaffected, 5/5 pass (segmentation has no
+  OCR-provider dependency).
+- `npm run test:ocr` (synthetic images) - 2/4 pass with `OCR_PROVIDER=easyocr`.
+  Both cover-photo cases pass; both spine-image cases (which render as small,
+  ultra-clean vertical vector text via SVG) fail, reading garbage
+  (`"Rings"`, `"the"`, `"JO"`, `"Coxen"` instead of "The Lord of the Rings" /
+  "J.R.R. Tolkien"). Confirmed this is not an adapter bug: the same garbage
+  comes back calling EasyOCR directly on the raw, uncompressed PNG (no
+  resize/JPEG step involved), and upscaling the image 3x doesn't help either.
+  This is a genuine, expected difference between the two engines rather than
+  a regression - EasyOCR is a scene-text model tuned for real photographed
+  text, and these synthetic cases are exactly the opposite of that (crisp,
+  noise-free, machine-rendered), while Tesseract (document-OCR-oriented)
+  handles them natively. The synthetic suite was written against Tesseract's
+  strengths; it isn't a representative benchmark for a scene-text engine and
+  isn't being chased for parity here - the real target is real photos (see
+  below), which is what this whole migration was for.
+- `npm run test:image` against both real photos from item 14 -
+  **substantial, real improvement**, matching what Step 1 predicted:
+  - The Penguin Clothbound Classics photo's merged decorative gold-foil
+    region (Sherlock Holmes/Jane Austen/Jane Eyre, the case Tesseract read
+    *nothing* off in item 14) now reads "COMPLETE SHERLOCK", "JANE",
+    "CHARLOTTE BRONTE", "AUSTEN", "BRONTE", "SEVEN NOVELS", "WUTHERING" -
+    real, legible fragments. End-to-end book matching found 3 books
+    (Charlotte Brontë biography, Jane Austen biography, Great Expectations)
+    from this photo - matched to biographies/companion volumes rather than
+    the actual novels in a couple of cases, a book-matching-layer ranking
+    nuance (same family of issue item 16 fixed a different instance of), not
+    an OCR problem, and out of scope for this migration.
+  - The plain-cover shelf photo (14-15 books) matched 5 books, including the
+    exact "Uncommon Service" case Step 1 flagged as a real win (author
+    surnames "FREI"/"MORRISS" both read correctly) - now confirmed working
+    all the way through to a match, not just an isolated OCR reading. Also
+    correctly matched "The Spider Network" from badly fragmented OCR
+    ("Matn Genius," "Gang of", "Bankers", "Greatest Scams", "David") and
+    "Grasping the Grape".
+- **Timing**: total pipeline time for the 15-spine shelf photo was ~81s
+  (segmentation 0.8s, OCR stage ~26s with the concurrency/downsizing above,
+  Google Books matching ~54s - matching, not OCR, is now the dominant cost).
+  This is what motivated item 11 below (make scanning async) and the Google
+  Books concurrency fix bundled into it.
+
+**Flipping the default to production (31 July 2026):** `OCR_PROVIDER` is now
+`easyocr` by default in both `backend/.env`/`.env.example` and Railway's
+production environment (`OCR_PROVIDER`/`OCR_SERVICE_URL`/`OCR_SERVICE_TOKEN`
+all added there). Verified live in production, not just locally: registered
+a throwaway account against the real Railway URL, ran a real shelf photo
+through `POST /api/scan/shelf`, and confirmed both that it completed without
+a database error and that the extracted text matched EasyOCR's known
+signature for that exact photo (fragmented tokens like `"TRIRE"`,
+`"FFRRICC"`, `"GRASPING"` - Tesseract reads that same photo completely
+differently). Test account cleaned up afterward.
+
+**A real bug found while flipping the default, not a new regression:**
+`ocr/index.js` read `process.env.OCR_PROVIDER` at module load time, but
+`server.js` (and every test script) calls `dotenv.config()` *after* its own
+`import` statements in source order - and ESM hoists all imports above other
+top-level code, so `ocr/index.js` (imported transitively via
+`scanController.js` → `bookRecognitionService.js`) always evaluated before
+`dotenv.config()` ran, silently defaulting to `'tesseract'` regardless of
+what `OCR_PROVIDER` was actually set to, in production as well as locally.
+This had been true since `easyocr` was added as an option - never caught
+earlier because every prior test happened to use a shell-level
+`OCR_PROVIDER=easyocr` override, which sidesteps the bug entirely (shell env
+vars are already in `process.env` before any code runs). Fixed by reading
+`process.env.OCR_PROVIDER` lazily inside `recognizeImage()` instead of at
+module scope - see CLAUDE.md's "Hard-won technical gotchas" for the general
+pattern, since this class of bug can recur in any new module that reads
+`process.env.X` at top-level scope.
+
+A second, unrelated production gap surfaced by that same test scan is
+covered under item 11 below (Railway's start command was skipping the
+database migration entirely).
+
+**Hosting decision folded into this item:** was originally its own backlog
+entry ("Hosting review") before this OCR work made it concrete. No longer
+hypothetical once a self-hosted PyTorch-based OCR service (EasyOCR/
+PaddleOCR) was decided on - loading such a model typically needs several
+hundred MB to 1GB+ of RAM before processing a single image, running as a
+second, mostly-idle service alongside the existing Node backend. Unlikely to
+fit comfortably on Railway's free plan, and a cold start on an idle
+free-tier service would compound with the scan-time problem (item 11).
+
+Ranked against this specific workload (Node + Postgres + a bursty,
+RAM-heavy OCR service, low personal-use volume):
+
+- **Render** — ruled out. Already worse cold starts (~50s) than Railway on
+  a *lighter* workload; a model-load step on top makes it worse.
+- **Hetzner / DigitalOcean VPS** (~EUR 4-5/month) — strongest fit for raw
+  resources: one box with a fixed, real chunk of RAM (~4GB on a Hetzner CX22
+  at that price) that both services share as plain processes/containers, no
+  per-service platform caps to negotiate. Cost: self-managing OS updates,
+  deploys, and uptime.
+- **Fly.io** — better match for the *usage pattern*: supports machines that
+  scale to zero when idle, so the OCR service only spins up (and only costs,
+  on usage-based pricing) when a scan actually happens, rather than paying
+  for an always-on model that's idle most of the time. Still Docker-based,
+  keeps more deploy convenience than a bare VPS.
+- **Modal** (serverless Python ML inference) — purpose-built for a bursty,
+  RAM-heavy, occasionally-used model: no Dockerfile or process supervision to
+  write, model weight caching and scale-to-zero handled by the platform. Free
+  Starter plan includes $30/month credit; CPU pricing (~$0.0000131/core-sec)
+  puts personal-volume usage a small fraction of that. Real tradeoff: some
+  lock-in — the OCR logic itself stays portable plain Python, but the
+  deployment wrapper is Modal's own SDK, not a plain Dockerfile.
+- **Oracle Cloud "Always Free" ARM VM** — a bare Ampere A1 VM, run as a
+  completely standard Docker container. Zero platform-specific API, same
+  portability as Railway/Hetzner/DO. Note: Oracle quietly halved the Always
+  Free Ampere A1 allowance (4 OCPU/24GB → 2 OCPU/12GB) on 15 June 2026 with no
+  announcement, and some running instances were shut down without warning —
+  a real signal the free tier's terms aren't fully stable.
+
+**First decided: Oracle Cloud Always Free ARM VM** — chosen over Modal
+specifically for lock-in: a bare VM running a standard Docker container is
+as portable as Railway's setup today — no proprietary SDK to rewrite if it's
+ever migrated away from. The ops work Oracle requires (Dockerfile, process
+supervision via systemd, keeping the box patched) was the reason Modal was
+under consideration, but was being accepted since it'd be handled directly
+rather than by the account owner.
+
+**Superseded: pivoted to Modal.** Oracle's own account/VM setup proved
+difficult enough in practice on the account owner's end (account creation,
+payment-method verification, region selection, and VM provisioning all have
+to happen through Oracle's own console under the account owner's login - not
+something that can be done on someone's behalf) that it wasn't worth pushing
+through. Modal was already the documented fallback for exactly this. The
+lock-in tradeoff accepted by choosing Modal is unchanged from the comparison
+above: some vendor lock-in in the deployment wrapper, in exchange for no
+VM/account setup or ongoing ops work at all - the account owner does a
+one-time `modal setup` login (opens a browser, stores credentials locally,
+no token ever shared) and everything else (writing the Python function,
+`modal deploy`, wiring it to the Node backend) is handled directly.
+
+Migration off either host would be easy: standard Node + Postgres using
+`DATABASE_URL`, no Railway-specific APIs, no lock-in on the app's own side.
+
+### 4. ISBN barcode scanning as a parallel capture mode — DONE (31 July 2026)
+Not a replacement for spine scanning — a complementary path. A barcode scan is
+near-100% accurate versus 13-70% for spine OCR, so for bulk-cataloguing a large
+collection it is by far the most reliable route. Client-side JS libraries
+(`@zxing/library`, `quagga2`) do this in-browser, so it needs no backend work.
+
+Built as a background decode loop inside the existing camera view
+(`useBarcodeScanner.js`, wrapping `@zxing/browser`'s `BrowserMultiFormatReader`)
+rather than a separate fourth method the user has to pick upfront - see item
+10 below for why. Confirmed no backend changes were needed: a detected ISBN
+is looked up via the already-working `scanAPI.searchExternal({ type: 'isbn' })`
+→ `searchByISBN` in `bookRecognitionService.js`, and added via the existing
+`scanAPI.batchAdd` with a 1-item array. Restricted to EAN-13/UPC-A formats so
+a decode only ever fires on an actual checksum-passing barcode, never on
+ordinary spine text.
+
+The sandboxed browser used for building this blocks real camera access
+(`getUserMedia` returns `NotAllowedError` unconditionally), so the decode
+loop itself couldn't be tested end-to-end there - only checked against the
+zxing library's own docs/source and a clean production build. **Confirmed
+working against a real physical barcode by the account owner (31 July
+2026)** - fully verified now, nothing outstanding on this item.
+
 ### 10. "Add" flow: separate method selection from camera access — DONE (31 July 2026)
 Real bug, not just a naming issue: `CameraScanner.jsx` requested camera
 permission unconditionally in a `useEffect` on mount
@@ -374,11 +475,7 @@ quick-add modal and inline on the Add page's "Enter Manually" method -
 verified both call sites still add a book correctly, through the same code.
 
 Barcode scanning (item 4) ended up folded into "Take Photo" itself rather
-than becoming a fourth method - see item 4's notes.
-
----
-
-## Infrastructure
+than becoming a fourth method - see item 4 above.
 
 ### 11. Make scanning asynchronous — DONE (31 July 2026)
 Scanning currently blocks an HTTP request for 6-40 seconds (this grew to
@@ -413,6 +510,22 @@ job is an in-process detached async function, so a server restart mid-scan
 forever. Fine for single-user personal-use volume; a real queue would be
 disproportionate effort for this.
 
+**Production gap found and fixed (31 July 2026):** this feature shipped
+with a broken schema migration in production for a period, unrelated to the
+code above. Railway's start command was just `npm start`, not
+`npm run db:migrate && npm start` as `DEPLOYMENT.md` recommends - so the
+`status`/`result`/`error` columns above never actually got created on the
+real production database, meaning every real scan attempt would have
+returned a Postgres "column does not exist" error. Fixed by updating
+Railway's start command to include the migrate step (safe to run on every
+boot - the migration is idempotent `ADD COLUMN IF NOT EXISTS`). Confirmed
+fixed via a full production test: registered a throwaway account against
+the real Railway URL, ran an actual scan, and confirmed it completed with
+real results instead of erroring. **Lesson for next time**: after *any*
+change to `backend/src/db/schema.sql`, explicitly check Railway's start
+command includes the migrate step before assuming it applied - don't rely
+on it having always been true.
+
 Alongside this, `bookRecognitionService.js`'s `scanShelfImage` also had its
 per-candidate Google Books lookup loop parallelized (bounded concurrency 5,
 via a `mapWithConcurrency` helper shared with `easyocrProvider.js` - now
@@ -420,94 +533,6 @@ lives in `backend/src/utils/concurrency.js`). This was the loop actually
 responsible for most of the ~80s figure above; verified against a real photo
 that the matching stage dropped from ~54s to ~25s with identical books
 matched, before the async change on top of it.
-
-### 12. Hosting review — DECIDED: Oracle Cloud (30 July 2026)
-Was "only if genuinely CPU-bound"; no longer hypothetical now that item 2
-commits to a self-hosted PyTorch-based OCR service (EasyOCR/PaddleOCR).
-Loading such a model typically needs several hundred MB to 1GB+ of RAM
-before processing a single image, running as a second, mostly-idle service
-alongside the existing Node backend. That's unlikely to fit comfortably on
-Railway's current free plan, and a cold start on an idle free-tier service
-would compound with the scan-time problem in item 11.
-
-Re-ranked against this specific workload (Node + Postgres + a bursty,
-RAM-heavy OCR service, low personal-use volume):
-
-- **Render** — ruled out. Already worse cold starts (~50s) than Railway on
-  a *lighter* workload; a model-load step on top makes it worse.
-- **Hetzner / DigitalOcean VPS** (~EUR 4-5/month) — strongest fit for raw
-  resources: one box with a fixed, real chunk of RAM (~4GB on a Hetzner CX22
-  at that price) that both services share as plain processes/containers, no
-  per-service platform caps to negotiate. Cost: self-managing OS updates,
-  deploys, and uptime.
-- **Fly.io** — better match for the *usage pattern*: supports machines that
-  scale to zero when idle, so the OCR service only spins up (and only costs,
-  on usage-based pricing) when a scan actually happens, rather than paying
-  for an always-on model that's idle most of the time. Still Docker-based,
-  keeps more deploy convenience than a bare VPS.
-
-Two more options considered before deciding, neither in the original list:
-
-- **Modal** (serverless Python ML inference) — purpose-built for a bursty,
-  RAM-heavy, occasionally-used model: no Dockerfile or process supervision to
-  write, model weight caching and scale-to-zero handled by the platform. Free
-  Starter plan includes $30/month credit; CPU pricing (~$0.0000131/core-sec)
-  puts personal-volume usage a small fraction of that. Real tradeoff: some
-  lock-in — the OCR logic itself stays portable plain Python, but the
-  deployment wrapper is Modal's own SDK, not a plain Dockerfile.
-- **Oracle Cloud "Always Free" ARM VM** — a bare Ampere A1 VM, run as a
-  completely standard Docker container. Zero platform-specific API, same
-  portability as Railway/Hetzner/DO. Note: Oracle quietly halved the Always
-  Free Ampere A1 allowance (4 OCPU/24GB → 2 OCPU/12GB) on 15 June 2026 with no
-  announcement, and some running instances were shut down without warning —
-  12GB is still comfortably enough for Node + Postgres + an EasyOCR model,
-  but it's a real signal the free tier's terms aren't fully stable.
-
-**Decided (30 July 2026): Oracle Cloud Always Free ARM VM** — chosen over
-Modal specifically for lock-in: a bare VM running a standard Docker
-container is as portable as Railway's setup today (see above) — no
-proprietary SDK to rewrite if it's ever migrated away from. The ops work
-Oracle requires (Dockerfile, process supervision via systemd, keeping the box
-patched) was the reason Modal was under consideration, but was being accepted
-since it'd be handled directly rather than by the account owner, and the
-earlier uptime concern was specifically about home-power reliability
-(irrelevant for a cloud-hosted VM in a real datacenter), not about ops effort
-in general.
-
-**Superseded (30 July 2026): pivoted to Modal.** Oracle's own account/VM
-setup proved difficult enough in practice on the account owner's end
-(exactly the kind of console-driven, can't-be-done-on-their-behalf step
-noted below) that it wasn't worth pushing through — this is the fallback the
-original decision already anticipated ("If Oracle's free tier proves
-unreliable in practice... Modal remains an easy fallback"), just triggered
-by setup friction rather than a capacity/limit issue specifically. The
-lock-in tradeoff accepted by choosing Modal is unchanged from the earlier
-comparison: some vendor lock-in in the deployment wrapper (Modal's own SDK,
-not a plain Dockerfile), in exchange for no VM/account setup or ongoing ops
-work at all. The OCR service's actual logic stays plain Python either way,
-so this pivot only affects the deployment wrapper, not the OCR code itself
-or anything already built in items 2's phased plan.
-
-Oracle's account creation, payment-method verification, region selection,
-and VM provisioning would have had to happen through its own console under
-the account owner's login — not something that could be done on their
-behalf. That constraint doesn't apply to Modal in the same way: the account
-owner does a one-time `modal setup` login (opens a browser, stores
-credentials locally, no token ever shared), and deployment itself - writing
-the Python function, running `modal deploy`, iterating, wiring it to the
-Node backend - is being handled directly from there.
-
-Migration is easy either way: standard Node + Postgres using `DATABASE_URL`,
-with no Railway-specific APIs. No lock-in on the app's own side.
-
----
-
-## Completed / Resolved
-
-Historical record of fully finished, decided-and-closed, or deliberately
-deprioritized work — nothing further planned. Kept for context and
-cross-references from active items above, not because there's further
-action here.
 
 ### 13. Public test endpoints are unauthenticated — DONE (30 July 2026)
 `backend/src/routes/test.js` mounted two routes with no auth and no rate limit,

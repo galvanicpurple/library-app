@@ -6,91 +6,54 @@ status, get recommendations. Built across several sessions with Claude Code;
 this file is a handoff for picking the work back up in a fresh session.
 
 **Start here:** read [BACKLOG.md](BACKLOG.md) — it's the live, ordered work
-plan (19 items). Active work is grouped by theme at the top (Security /
-correctness, Scan accuracy, Features, Infrastructure); fully finished,
-decided-and-closed, or deprioritized items are kept in a separate
-"Completed / Resolved" section at the end, not deleted. This file is
-orientation and gotchas; BACKLOG.md is what to actually do next.
+plan. Active work is grouped by theme (Security/correctness, Scan accuracy,
+Features, Infrastructure); finished, decided, or deprioritized items move to
+a "Completed / Resolved" section at the end instead of being deleted, so you
+can see *why* something was decided, not just that it was. This file
+(`CLAUDE.md`) is orientation, architecture, and gotchas - BACKLOG.md is what
+to actually work on.
 
-**Immediate next action:** two decisions are now waiting on the account
-owner, neither requires more building:
+## Current state (as of 31 July 2026)
 
-1. Item 2 (OCR provider migration, Tesseract → EasyOCR on Modal) is
-   **built and verified end-to-end** (30 July 2026) - the Modal endpoint is
-   deployed, `easyocrProvider.js` exists and is wired into
-   `OCR_PROVIDER=easyocr`, and both real test photos from item 14 show a
-   substantial, real accuracy improvement over Tesseract (see BACKLOG.md
-   item 2's "Steps 2-5 findings"). Whether to flip `OCR_PROVIDER` to
-   `easyocr` as the default (still `tesseract` in `backend/.env`/
-   `.env.example`) and add `OCR_PROVIDER`/`OCR_SERVICE_URL`/
-   `OCR_SERVICE_TOKEN` to Railway's production environment is left to the
-   account owner - it changes live scan behavior and starts drawing on
-   Modal's free-tier credits on every real scan, not just test runs.
-2. Items 4, 10, and 11 (Add-flow redesign with barcode scanning, and async
-   shelf scanning) are **also built and verified** (31 July 2026) - see
-   BACKLOG.md for full detail on each. `/scan` is now `/add` with a
-   method-selection start screen (Take Photo / Upload Photo / Enter
-   Manually), barcode detection runs as a background decode loop inside
-   the camera view rather than a separate method, and shelf-photo scanning
-   is now asynchronous end-to-end (`scan_sessions` gained a status column,
-   `POST /api/scan/shelf` responds in ~0.2s, `Add.jsx` polls
-   `GET /api/scan/status/:id`). Nothing here is blocked on a decision -
-   these are already live in the codebase (not yet pushed to `main`/Railway
-   as of this writing). One real gap: the barcode decode loop was verified
-   against `@zxing/browser`'s own API docs and a clean build, but not
-   against a real physical barcode - the sandboxed browser used for testing
-   this session blocks real camera access. Worth a real-device check before
-   relying on it.
+Everything planned as of the last session is **built, deployed, and verified
+in production** - there is no pending decision or half-finished feature
+right now:
 
-Context already done, don't redo it:
+- **OCR runs on EasyOCR, not Tesseract** (BACKLOG.md item 2). Self-hosted on
+  Modal (a serverless Python host), not a third-party API like Google Cloud
+  Vision, for privacy (photos never leave your own infrastructure). This is
+  a real, verified accuracy improvement - Tesseract read *nothing* on many
+  decorative or stylized-font book spines; EasyOCR reads real, matchable
+  text off the same photos. See item 2 for the details and measurements.
+- **Adding a book has three methods** behind one "Add" nav entry
+  (`frontend/src/pages/Add.jsx`, item 10): take a photo, upload a photo, or
+  type it in by hand. Taking a photo also runs a live barcode scanner in the
+  background (item 4) - point the camera at a barcode and it adds that exact
+  book immediately, no separate "barcode mode" needed. **Confirmed working
+  against a real physical barcode by the account owner.** This gives a
+  reliable fallback for books whose spine or cover doesn't OCR well - most
+  books printed after the 1970s have a barcode somewhere.
+- **Scanning a shelf photo is asynchronous** (item 11): submitting a photo
+  returns immediately, and the page polls for results in the background,
+  instead of one browser tab sitting frozen for up to 80 seconds.
+- All of the above is confirmed working **in production**, not just in
+  local testing - verified by running a real scan against the live Railway
+  backend with a throwaway test account (see "Verifying a real fix in
+  production" under Deployment below for why that's the right way to check
+  this, since there's no staging environment).
 
-- Full-resolution real-photo testing (item 14) already ruled out resolution
-  as the bottleneck and confirmed Tesseract itself - not the image quality -
-  is the dominant failure, on two axes: decorative background patterns, and
-  certain bold/stylized display fonts.
-- The provider decision is made: self-hosted **EasyOCR**, not Cloud Vision
-  (privacy - won't send photos to Google) and not Tesseract-tuning (item 15,
-  deprioritized - the failures aren't a threshold problem).
-- Hosting is **Modal** (item 12), deployed at
-  `https://galvanicpurple--libraryapp-ocr-ocrservice-recognize.modal.run` -
-  see `ocr-service/app.py` and `ocr-service/README.md` for the service itself
-  and its deploy/auth/gotchas.
-- **Phase 0 (validate EasyOCR) and the full build/verify (steps 2-5) are
-  both done** - see BACKLOG.md item 2. Real, substantial improvement over
-  Tesseract confirmed against both item-14 real photos, not just isolated
-  crops: spines with decorative gold-foil backgrounds and stylized fonts
-  that Tesseract read *nothing* off now produce real legible text and, in
-  several cases, correct end-to-end book matches (including the exact
-  "Uncommon Service" case Phase 0 flagged as a win). The synthetic
-  `test:ocr` suite's two spine-image cases fail under `OCR_PROVIDER=easyocr`
-  - confirmed to be an expected engine-characteristic difference (EasyOCR is
-  scene-text-tuned; those synthetic images are the opposite of scene text),
-  not an adapter bug, and not worth chasing parity on given real photos are
-  the actual target.
-- **Not resolved by this migration alone**: total pipeline time for a dense
-  shelf was still ~80s (OCR dropped a lot thanks to downsizing crops +
-  bounded concurrency before upload, but Google Books matching dominated at
-  ~50s+). This is what motivated items 11 (async scanning) and the Google
-  Books concurrency fix, both now done - see below.
+**If you're picking up fresh with no specific task assigned:** BACKLOG.md
+item 3 (a real-photo benchmark set with known-correct answers) is probably
+the highest-leverage next step - every accuracy claim so far has been
+checked against just 1-2 photos by hand, which makes it hard to trust
+whether a future change actually helps or quietly regresses something.
+Otherwise, just read BACKLOG.md's "Active" sections top to bottom and pick
+whatever matches what you've been asked to do.
 
-**Decisions that were open, now settled by the build:**
-
-- Modal versions built against: `modal==1.5.3`, `easyocr==1.7.2`. The
-  `@modal.fastapi_endpoint(method="POST")` decorator is current for 1.5.3 -
-  `@modal.web_endpoint` is the older name, don't reach for it.
-- Endpoint auth: a shared-secret `Authorization: Bearer <token>` header,
-  checked in `ocr-service/app.py` against the `ocr-service-token` Modal
-  secret, matching value in `backend/.env` as `OCR_SERVICE_TOKEN`.
-- Image transfer format: raw bytes as the POST body (no multipart), one
-  image in, one `{ lines: [...] }` JSON response out. `easyocrProvider.js`
-  builds the final `{ fullText, lines }` shape on the Node side.
-- Cold-start penalty is real and expected (confirmed during verification,
-  first-call latency well above warm-call latency) - not a bug, not
-  currently worth `min_containers`/keep-warm given personal-use volume (see
-  item 12's hosting reasoning). `easyocrProvider.js` also downsizes crops to
-  1500px/JPEG-85 before upload and runs up to 6 requests concurrently, both
-  of which cut real request time independent of the cold-start question -
-  see BACKLOG.md item 2 for the measurements.
+For the full history of *how* the EasyOCR/Add-flow/async-scanning work
+above was decided and built (Modal vs. other hosts, EasyOCR vs. other OCR
+engines, the exact bugs hit and fixed), see BACKLOG.md items 2, 4, 10, and
+11 - this file intentionally doesn't repeat all of that narrative.
 
 ## Architecture
 
@@ -99,18 +62,21 @@ Context already done, don't redo it:
 - **Frontend**: `frontend/` — React + Vite, plain CSS (no framework),
   Zustand for auth state. Deployed on Vercel.
 - **OCR pipeline**: `backend/src/services/ocr/` — provider-agnostic by
-  design (`index.js` picks a provider via `OCR_PROVIDER` env var, defaults
-  to `tesseract`; `easyocr` is the other option, see BACKLOG.md item 2).
-  `tesseractProvider.js` runs recognition in-process. `easyocrProvider.js`
-  instead makes an HTTP call out to a Modal-hosted EasyOCR service
-  (`ocr-service/app.py`, deployed separately with `modal deploy`) - crops are
-  downsized before upload and OCR'd with bounded concurrency (6 at a time),
-  since each call is an independent stateless request rather than a shared
-  in-process worker. Both resolve to the same
+  design (`index.js` picks a provider via the `OCR_PROVIDER` env var,
+  currently defaulting to **`easyocr`**; `tesseract` still exists as a
+  fallback option, see BACKLOG.md item 2). `tesseractProvider.js` runs
+  recognition in-process. `easyocrProvider.js` instead makes an HTTP call
+  out to a Modal-hosted EasyOCR service (`ocr-service/app.py`, deployed
+  separately with `modal deploy` - built against `modal==1.5.3`,
+  `easyocr==1.7.2`, auth via a shared-secret `Authorization: Bearer <token>`
+  header) - crops are downsized before upload and OCR'd with bounded
+  concurrency (6 at a time), since each call is an independent stateless
+  request rather than a shared in-process worker. Both resolve to the same
   `{ fullText, lines: [{ text, confidence, rotation, bbox }] }` shape.
   `spineSegmentation.js` splits a shelf photo into individual book-spine
   crops before OCR runs on each one - shared by both providers, not
-  provider-specific.
+  provider-specific. Full deploy/auth/gotcha detail lives in
+  `ocr-service/README.md`, not repeated here.
 - **Book matching**: `backend/src/services/bookRecognitionService.js` —
   turns OCR'd text into Google Books matches. Has real anti-garbage logic
   (relevance scoring, author-weighted matching, two-corroborating-words
@@ -146,14 +112,37 @@ Context already done, don't redo it:
 ## Deployment
 
 - GitHub: `galvanicpurple/library-app`, `main` branch.
-- **Push to `main` auto-deploys both Railway and Vercel.** There is no CI —
-  a push is live within minutes. Always run the relevant test script(s)
-  before pushing (see Testing below); there's no safety net otherwise.
+- **Push to `main` auto-deploys both Railway (backend) and Vercel
+  (frontend).** There is no CI — a push is live within minutes. Always run
+  the relevant test script(s) before pushing (see Testing below); there's no
+  safety net otherwise.
+- Production URLs: frontend `https://library-app-frontend-five.vercel.app`,
+  backend `https://libraryapp.up.railway.app` (its `/health` endpoint is
+  public, no auth needed - the fastest way to check a deploy actually went
+  through).
+- **Railway's start command must be `npm run db:migrate && npm start`, not
+  just `npm start`.** This wasn't true for a while and nobody noticed until
+  a schema change (item 11) silently never applied to production - the
+  migration only ever ran locally. The migration script is idempotent
+  (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), so it's safe to
+  run on every single boot, not just the first one. If you add a new column
+  to `backend/src/db/schema.sql`, don't assume it reached production - check
+  this.
+- **Verifying a real fix in production**: there's no staging environment, so
+  the reliable way to check something actually works live (not just
+  locally) is to register a throwaway account against the real production
+  API (`POST /api/auth/register` on the Railway URL above) and exercise the
+  actual feature through it, then clean up. **There's no self-service
+  "delete my account" endpoint** (BACKLOG.md item 20), so cleanup means
+  either running `DELETE FROM users WHERE email = '...'` yourself via
+  Railway's dashboard (open the **Postgres service** - not the backend
+  service - and look for a "Data" tab, which usually has a way to run raw
+  SQL), or asking the account owner to run it, since production database
+  credentials shouldn't be pasted into a chat session. The delete cascades
+  to that user's books/shelves/scans automatically via existing foreign-key
+  constraints - nothing else needs cleaning up by hand.
 - Real user account exists in the shared Postgres DB: `isaacchai@hotmail.com`
-  / "Isaac Chai". **Never modify or delete this account or its data.** Any
-  test accounts created for verification should be cleaned up afterward
-  (`DELETE FROM users WHERE email LIKE '...'` — cascades to their books/
-  shelves/readings via FK constraints).
+  / "Isaac Chai". **Never modify or delete this account or its data.**
 
 ## Local dev environment — gotchas that cost real time this session
 
@@ -162,16 +151,23 @@ Context already done, don't redo it:
   session**. A `frontend/.env.local` (gitignored, already created) overrides
   it to `http://localhost:5000/api` for local testing — don't edit the
   tracked `.env`, it's the user's actual setup.
-- **Stale nodemon processes silently squat on port 5000.** Backgrounding
-  `npm run dev` when something is already listening produces an `EADDRINUSE`
-  crash in the *new* process while the *old* one keeps serving stale code —
-  and `curl http://localhost:5000/health` will happily return 200 from the
-  zombie, giving false confidence that a fix is live. This caused a genuine
-  wasted round-trip mid-session (see the `updateReading` fix history in the
-  backlog). Always verify before trusting a "it still fails" result:
+- **Stale processes silently squat on port 5000 (backend) and 5173
+  (frontend), across sessions, not just within one.** A `npm run dev`/
+  `npm run build`+preview left running from a *previous* session is still
+  there when a new session starts. Backgrounding a fresh `npm run dev` when
+  something's already listening produces an `EADDRINUSE` crash in the *new*
+  process while the *old* one keeps serving stale code - and
+  `curl http://localhost:5000/health` will happily return 200 from the
+  zombie, giving false confidence that a fix is live. Always check first,
+  and re-check after killing (killing and immediately restarting can itself
+  race - the OS may not have released the port yet, causing the *new*
+  process to also fail with `EADDRINUSE`; if that happens, just wait a
+  couple seconds and retry):
   ```bash
-  netstat -ano | grep ":5000" | grep LISTENING   # note the PID
-  # if a fix isn't reflected, taskkill //F //PID <pid> and restart clean
+  netstat -ano | grep ":5000" | grep LISTENING   # note the PID (repeat for :5173)
+  taskkill //F //PID <pid>
+  # then verify the port is actually free before restarting:
+  netstat -ano | grep ":5000" | grep LISTENING   # should print nothing
   ```
 - **Auth endpoints are rate-limited** (5 requests/15min via `authLimiter`,
   in-memory). Repeated test registrations during a session will 429 —
@@ -236,6 +232,37 @@ codebase yet, only these standalone diagnostic scripts.
 
 ## Hard-won technical gotchas
 
+- **Reading `process.env.X` at the top level of a module (not inside a
+  function) is fragile in this codebase, and it silently broke production
+  for an unknown period of time.** `server.js` imports its route files
+  *before* calling `dotenv.config()` in its own source code - normally
+  harmless, except JavaScript's ES module system hoists every `import`
+  statement above all other code in a file, including ones written after
+  `dotenv.config()`. So any file that gets imported (even indirectly, through
+  several other files) and reads `process.env.SOMETHING` as a top-level
+  `const` will see `undefined` at that moment, because `dotenv.config()`
+  hasn't run yet - it evaluates a `.env` file into `process.env`, but only
+  once the *importing* file's own code starts running, which is after every
+  import has already been resolved. This exact bug made
+  `backend/src/services/ocr/index.js`'s provider selection always silently
+  fall back to `'tesseract'`, no matter what `OCR_PROVIDER` was set to
+  anywhere - `.env`, `.env.example`, even Railway's real production
+  environment variables. It went unnoticed because every test during
+  development happened to set `OCR_PROVIDER` as a shell-level environment
+  variable instead (`OCR_PROVIDER=easyocr npm run test:...`), which sidesteps
+  the whole problem - a variable set directly in the shell is already
+  present in `process.env` before Node even starts, so timing doesn't matter
+  for it.
+  **The fix, and the rule going forward:** read `process.env.X` *inside* a
+  function (at the moment it's actually called), not as a top-level `const`
+  - by the time any request is actually being handled, `dotenv.config()` has
+  long since finished, so a read at that point is always safe. (The
+  alternative used by `backend/src/db/db.js` - calling `dotenv.config()`
+  again at the top of that specific file - also works, since it doesn't
+  depend on some *other* file having already called it, but reading lazily
+  is simpler and doesn't require remembering to do this in every new file.)
+  **If you add any new module that reads an env var at module scope, this is
+  the bug to check for first if it doesn't seem to pick up its config.**
 - **Postgres parameter type unification.** A single `$N` placeholder used
   both positionally (into a typed column, e.g. `varchar`) and inside a
   string comparison (which infers `text`) within *the same statement* will
@@ -266,6 +293,41 @@ codebase yet, only these standalone diagnostic scripts.
   two-corroborating-words rule in `bookRecognitionService.js` trades a few
   missed one-word titles for eliminating wrong-but-confident matches — a
   silent wrong book in the library is worse than a miss.
+
+## Verifying the frontend in a sandboxed browser
+
+The Browser pane used to click through the app during development behaves
+differently from a real user's browser in a few ways that look like bugs at
+first but usually aren't:
+
+- **It cannot grant real camera access.** `getUserMedia` always fails with
+  `NotAllowedError`, even for a feature that works fine on a real phone or
+  laptop. This means camera-dependent features (the live barcode scanner,
+  taking an actual photo) can only be checked by reading the code carefully
+  and confirming a clean build - not by actually watching them work. Get a
+  real person with a real device to confirm those before trusting them
+  fully (this is exactly what happened with barcode scanning - confirmed
+  separately by the account owner on a real device).
+- **A toast notification can get stuck on screen indefinitely**, unlike a
+  real browser tab. `react-toastify` is configured with `pauseOnFocusLoss`,
+  which pauses a toast's auto-dismiss timer whenever the tab loses focus -
+  and the sandboxed browser never sends the normal focus/blur events a real
+  browser tab would, so a toast's timer can just never resume. A stuck toast
+  sitting in the corner can visually and functionally block clicks on a
+  nearby button (e.g. a modal's close button in the same corner) - if a
+  click that should work appears to silently do nothing, check whether a
+  leftover toast is actually sitting on top of it before assuming the
+  button itself is broken.
+- **Clearing only `localStorage`'s `token` key isn't the same as logging
+  out.** This app's auth state lives in two places at once: Zustand's own
+  persisted state (under the `auth-storage` key) and a separate, plain
+  `localStorage.setItem('token', ...)` written alongside it. The app's real
+  `logout()` function clears both correctly - but manually removing just
+  `token` (e.g. while resetting state between manual tests) leaves Zustand
+  still believing `isAuthenticated: true`, so the app keeps rendering pages
+  as if logged in while every actual API call silently fails with 401. If
+  you need to reset auth state by hand rather than clicking "Logout", clear
+  everything (`localStorage.clear()`), not just one key.
 
 ## Conventions observed in this codebase
 
