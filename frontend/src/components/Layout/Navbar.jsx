@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { FaBook, FaHome, FaCamera, FaBookmark, FaLightbulb, FaUser, FaSignOutAlt } from 'react-icons/fa';
+import { FaBook, FaHome, FaPlus, FaBookmark, FaLightbulb, FaUser, FaSignOutAlt } from 'react-icons/fa';
 import useAuthStore from '../../store/authStore';
 import './Navbar.css';
 
@@ -17,7 +17,7 @@ const Navbar = () => {
     { path: '/dashboard', icon: FaHome, label: 'Dashboard' },
     { path: '/library', icon: FaBook, label: 'Library' },
     { path: '/shelves', icon: FaBookmark, label: 'Shelves' },
-    { path: '/scan', icon: FaCamera, label: 'Scan' },
+    { path: '/add', icon: FaPlus, label: 'Add' },
     { path: '/recommendations', icon: FaLightbulb, label: 'Recommendations' },
   ];
 

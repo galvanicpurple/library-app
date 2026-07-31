@@ -115,3 +115,60 @@
     justify-content: center;
   }
 }
+
+.method-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.method-buttons .btn {
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px 32px;
+  min-width: 160px;
+}
+
+.method-buttons svg {
+  font-size: 28px;
+}
+
+.barcode-confirm {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.barcode-confirm-card {
+  background-color: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px var(--shadow);
+  padding: 24px;
+  margin-top: 20px;
+}
+
+.barcode-confirm-card img {
+  max-width: 160px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.barcode-confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .method-buttons {
+    flex-direction: column;
+  }
+
+  .method-buttons .btn {
+    width: 100%;
+  }
+}

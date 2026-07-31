@@ -1,0 +1,58 @@
+.photo-upload {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.photo-upload-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.photo-upload-header h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.photo-upload-close {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-upload-close:hover {
+  opacity: 0.7;
+}
+
+.photo-upload-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  color: white;
+  gap: 20px;
+}
+
+.photo-upload-body p {
+  max-width: 400px;
+  color: rgba(255, 255, 255, 0.85);
+}

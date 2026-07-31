@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { FaSearch, FaTimes, FaTrash, FaPlus } from 'react-icons/fa';
 import { toast } from 'react-toastify';
-import { booksAPI, readingsAPI, shelvesAPI } from '../utils/api';
+import { booksAPI, readingsAPI } from '../utils/api';
 import StarRating from '../components/StarRating';
+import ManualAddForm from '../components/Books/ManualAddForm';
 import './Library.css';
 
 const READING_STATUSES = [
@@ -13,25 +14,6 @@ const READING_STATUSES = [
   { value: 'abandoned', label: 'Abandoned' },
 ];
 
-const EMPTY_BOOK = {
-  title: '',
-  authors: '',
-  isbn: '',
-  publisher: '',
-  publishedDate: '',
-  pageCount: '',
-  categories: '',
-  shelfId: '',
-  notes: '',
-};
-
-// "1, 2 ,3" -> ['1','2','3'], and an empty string to undefined so the API
-// stores NULL rather than an array containing one empty string.
-const toArray = (text) => {
-  const items = text.split(',').map((s) => s.trim()).filter(Boolean);
-  return items.length > 0 ? items : undefined;
-};
-
 const Library = () => {
   const [books, setBooks] = useState([]);
   const [search, setSearch] = useState('');
@@ -39,23 +21,11 @@ const Library = () => {
   const [removingId, setRemovingId] = useState(null);
   const [savingBookId, setSavingBookId] = useState(null);
 
-  const [shelves, setShelves] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newBook, setNewBook] = useState(EMPTY_BOOK);
-  const [addError, setAddError] = useState('');
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadBooks();
   }, [search]);
-
-  useEffect(() => {
-    shelvesAPI.getAll()
-      .then((res) => setShelves(res.data.shelves))
-      .catch(() => {
-        // Shelf assignment is optional; adding a book without one still works.
-      });
-  }, []);
 
   const loadBooks = async () => {
     try {
@@ -156,44 +126,6 @@ const Library = () => {
     }
   };
 
-  const handleAddBook = async (e) => {
-    e.preventDefault();
-    setAddError('');
-
-    if (!newBook.title.trim()) {
-      setAddError('Title is required');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await booksAPI.add({
-        title: newBook.title.trim(),
-        authors: toArray(newBook.authors),
-        isbn: newBook.isbn.trim() || undefined,
-        publisher: newBook.publisher.trim() || undefined,
-        publishedDate: newBook.publishedDate.trim() || undefined,
-        pageCount: newBook.pageCount ? Number(newBook.pageCount) : undefined,
-        categories: toArray(newBook.categories),
-        shelfId: newBook.shelfId || undefined,
-        notes: newBook.notes.trim() || undefined,
-      });
-
-      toast.success(`Added "${newBook.title.trim()}"`);
-      setShowAddModal(false);
-      setNewBook(EMPTY_BOOK);
-      loadBooks();
-    } catch (error) {
-      console.error('Add book error:', error);
-      const details = error.response?.data?.details?.[0]?.msg;
-      setAddError(details || error.response?.data?.error || 'Failed to add book');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const setField = (field) => (e) => setNewBook({ ...newBook, [field]: e.target.value });
-
   return (
     <div className="library-container">
       <div className="container">
@@ -289,133 +221,10 @@ const Library = () => {
       {showAddModal && (
         <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Add a Book</h2>
-              <button
-                className="btn-close"
-                onClick={() => setShowAddModal(false)}
-                aria-label="Close"
-              >
-                <FaTimes />
-              </button>
-            </div>
-
-            <p className="modal-intro">
-              For books that scanning or search can&apos;t find. Only the title is required.
-            </p>
-
-            <form onSubmit={handleAddBook} className="modal-form">
-              {addError && <div className="form-error">{addError}</div>}
-
-              <div className="form-group">
-                <label className="label" htmlFor="mb-title">Title *</label>
-                <input
-                  id="mb-title"
-                  className="input"
-                  value={newBook.title}
-                  onChange={setField('title')}
-                  autoFocus
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="label" htmlFor="mb-authors">Author(s)</label>
-                <input
-                  id="mb-authors"
-                  className="input"
-                  value={newBook.authors}
-                  onChange={setField('authors')}
-                  placeholder="Separate multiple authors with commas"
-                />
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="label" htmlFor="mb-isbn">ISBN</label>
-                  <input
-                    id="mb-isbn"
-                    className="input"
-                    value={newBook.isbn}
-                    onChange={setField('isbn')}
-                    placeholder="10 or 13 digits"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label" htmlFor="mb-pages">Pages</label>
-                  <input
-                    id="mb-pages"
-                    type="number"
-                    min="1"
-                    className="input"
-                    value={newBook.pageCount}
-                    onChange={setField('pageCount')}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="label" htmlFor="mb-publisher">Publisher</label>
-                  <input
-                    id="mb-publisher"
-                    className="input"
-                    value={newBook.publisher}
-                    onChange={setField('publisher')}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="label" htmlFor="mb-published">Published</label>
-                  <input
-                    id="mb-published"
-                    className="input"
-                    value={newBook.publishedDate}
-                    onChange={setField('publishedDate')}
-                    placeholder="e.g. 1954"
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="label" htmlFor="mb-categories">Genres</label>
-                <input
-                  id="mb-categories"
-                  className="input"
-                  value={newBook.categories}
-                  onChange={setField('categories')}
-                  placeholder="Separate with commas"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="label" htmlFor="mb-shelf">Shelf</label>
-                <select
-                  id="mb-shelf"
-                  className="input"
-                  value={newBook.shelfId}
-                  onChange={setField('shelfId')}
-                >
-                  <option value="">Don&apos;t assign to a shelf</option>
-                  {shelves.map((shelf) => (
-                    <option key={shelf.id} value={shelf.id}>{shelf.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="label" htmlFor="mb-notes">Notes</label>
-                <input
-                  id="mb-notes"
-                  className="input"
-                  value={newBook.notes}
-                  onChange={setField('notes')}
-                />
-              </div>
-
-              <button type="submit" className="btn btn-primary btn-block" disabled={saving}>
-                {saving ? 'Adding...' : 'Add to Library'}
-              </button>
-            </form>
+            <ManualAddForm
+              onCancel={() => setShowAddModal(false)}
+              onSuccess={() => { setShowAddModal(false); loadBooks(); }}
+            />
           </div>
         </div>
       )}

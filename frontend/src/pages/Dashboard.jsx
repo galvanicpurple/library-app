@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { FaBook, FaBookmark, FaCamera, FaChartLine } from 'react-icons/fa';
+import { FaBook, FaBookmark, FaCamera, FaChartLine, FaPlus } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import { booksAPI, readingsAPI, shelvesAPI, recommendationsAPI } from '../utils/api';
 import useAuthStore from '../store/authStore';
@@ -95,7 +95,7 @@ const Dashboard = () => {
             </div>
           </Link>
 
-          <Link to="/scan" className="stat-card">
+          <Link to="/add" className="stat-card">
             <div className="stat-icon" style={{ background: '#e0e7ff' }}>
               <FaCamera style={{ color: '#6366f1' }} />
             </div>
@@ -138,9 +138,9 @@ const Dashboard = () => {
         <div className="quick-actions">
           <h2>Quick Actions</h2>
           <div className="actions-grid">
-            <Link to="/scan" className="action-card">
-              <FaCamera />
-              <span>Scan Books</span>
+            <Link to="/add" className="action-card">
+              <FaPlus />
+              <span>Add Books</span>
             </Link>
             <Link to="/library" className="action-card">
               <FaBook />

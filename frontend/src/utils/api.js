@@ -83,6 +83,7 @@ export const scanAPI = {
   scanShelf: (formData) => api.post('/scan/shelf', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),
+  getStatus: (id) => api.get(`/scan/status/${id}`),
   searchExternal: (params) => api.get('/scan/search', { params }),
   getHistory: () => api.get('/scan/history'),
   batchAdd: (data) => api.post('/scan/batch', data),

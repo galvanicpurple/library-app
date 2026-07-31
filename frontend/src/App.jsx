@@ -7,7 +7,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Library from './pages/Library';
 import Shelves from './pages/Shelves';
-import Scan from './pages/Scan';
+import Add from './pages/Add';
 import Recommendations from './pages/Recommendations';
 import Profile from './pages/Profile';
 import Navbar from './components/Layout/Navbar';
@@ -78,13 +78,13 @@ function App() {
                 </ProtectedRoute>
               } 
             />
-            <Route 
-              path="/scan" 
+            <Route
+              path="/add"
               element={
                 <ProtectedRoute>
-                  <Scan />
+                  <Add />
                 </ProtectedRoute>
-              } 
+              }
             />
             <Route 
               path="/recommendations" 

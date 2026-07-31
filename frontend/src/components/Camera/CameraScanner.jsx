@@ -2,15 +2,18 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { FaCamera, FaTimes, FaUpload } from 'react-icons/fa';
 import { toast } from 'react-toastify';
+import { validateImageFile } from '../../utils/imageValidation';
+import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import './CameraScanner.css';
 
-const CameraScanner = ({ onCapture, onClose }) => {
+const CameraScanner = ({ onCapture, onBarcodeDetected, onClose }) => {
   const [hasPermission, setHasPermission] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [devices, setDevices] = useState([]);
   const [selectedDevice, setSelectedDevice] = useState(null);
   const webcamRef = useRef(null);
   const fileInputRef = useRef(null);
+  const barcodeScanner = useBarcodeScanner(onBarcodeDetected);
 
   // Request camera permission on mount
   useEffect(() => {
@@ -80,8 +83,11 @@ const CameraScanner = ({ onCapture, onClose }) => {
   const captureImage = useCallback(() => {
     if (!webcamRef.current) return;
 
+    // Otherwise a barcode could still decode from the in-flight frame and
+    // fire onBarcodeDetected right as this component is about to unmount.
+    barcodeScanner.stop();
     setIsCapturing(true);
-    
+
     try {
       const imageSrc = webcamRef.current.getScreenshot();
       
@@ -110,29 +116,33 @@ const CameraScanner = ({ onCapture, onClose }) => {
       toast.error('Failed to capture image');
       setIsCapturing(false);
     }
-  }, [onCapture]);
+  }, [onCapture, barcodeScanner.stop]);
 
   // Handle file upload as alternative
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
-    
-    if (!file) return;
-
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file');
+    const { valid, error } = validateImageFile(file);
+    if (!valid) {
+      toast.error(error);
       return;
     }
-
-    // Validate file size (10MB max)
-    const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error('Image too large. Maximum size is 10MB');
-      return;
-    }
-
     onCapture(file);
   };
+
+  // Fires once react-webcam's underlying <video> element has an active
+  // stream - starting the barcode decode loop any earlier would hand zxing
+  // a video element with no frames yet. Runs alongside manual capture, not
+  // instead of it: most of the time nothing decodes (a shelf photo has no
+  // barcode in frame) and this is a no-op.
+  const handleUserMedia = useCallback(() => {
+    if (onBarcodeDetected && webcamRef.current?.video) {
+      // Also fires after switchCamera() attaches a new stream - stop any
+      // decode loop still bound to the previous video element first so
+      // switching cameras can't leave two loops running at once.
+      barcodeScanner.stop();
+      barcodeScanner.start(webcamRef.current.video);
+    }
+  }, [onBarcodeDetected, barcodeScanner.start, barcodeScanner.stop]);
 
   // Switch camera (front/back on mobile)
   const switchCamera = () => {
@@ -204,7 +214,7 @@ const CameraScanner = ({ onCapture, onClose }) => {
   return (
     <div className="camera-scanner">
       <div className="camera-header">
-        <h3>Scan Your Bookshelf</h3>
+        <h3>Take a Photo</h3>
         <button className="btn-close" onClick={onClose}>
           <FaTimes />
         </button>
@@ -216,6 +226,7 @@ const CameraScanner = ({ onCapture, onClose }) => {
             ref={webcamRef}
             audio={false}
             screenshotFormat="image/jpeg"
+            onUserMedia={handleUserMedia}
             videoConstraints={{
               deviceId: selectedDevice,
               facingMode: 'environment',
@@ -231,7 +242,11 @@ const CameraScanner = ({ onCapture, onClose }) => {
           
           <div className="camera-overlay">
             <div className="scan-guide">
-              <p>Position your bookshelf within the frame</p>
+              <p>
+                {onBarcodeDetected
+                  ? 'Point at a barcode to add that book instantly, or capture a shelf/spine photo below'
+                  : 'Position your bookshelf within the frame'}
+              </p>
             </div>
           </div>
         </div>
