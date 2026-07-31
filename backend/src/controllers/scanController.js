@@ -1,45 +1,104 @@
 import { query } from '../db/db.js';
 import { scanShelfImage, manualBookSearch, searchByISBN } from '../services/bookRecognitionService.js';
 import fs from 'fs';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+
+// Runs the actual OCR+matching pipeline after scanShelf has already
+// responded - a full shelf scan can take 30-80+ seconds (OCR + Google Books
+// matching), well past what's reasonable to hold one HTTP request open for.
+// Not awaited by its caller; updates the scan_sessions row when done so
+// getScanStatus has something to report.
+const processScanJob = async (scanSessionId, imageBuffer) => {
+  try {
+    const scanResult = await scanShelfImage(imageBuffer);
+    await query(
+      `UPDATE scan_sessions SET status = 'completed', books_found = $1, result = $2 WHERE id = $3`,
+      [scanResult.booksFound, JSON.stringify(scanResult), scanSessionId]
+    );
+  } catch (error) {
+    console.error('Scan job error:', error);
+    await query(
+      `UPDATE scan_sessions SET status = 'failed', error = $1 WHERE id = $2`,
+      [error.message, scanSessionId]
+    ).catch((updateError) => {
+      console.error('Failed to record scan job failure:', updateError);
+    });
+  }
+};
 
 // Scan shelf image
 export const scanShelf = async (req, res) => {
   try {
     const { shelfId } = req.body;
-    
+
     if (!req.file) {
       return res.status(400).json({ error: 'No image file provided' });
     }
 
-    // Read uploaded image
+    // Read uploaded image now, while the temp file is still guaranteed to
+    // exist - the actual OCR/matching happens later, detached from this
+    // request.
     const imageBuffer = fs.readFileSync(req.file.path);
 
-    // Scan image and identify books
-    const scanResult = await scanShelfImage(imageBuffer);
-
-    // Create scan session record
+    // Create scan session record up front, in 'processing' state. image_url
+    // is deliberately not set to req.file.path: Railway's filesystem is
+    // ephemeral, so that local path stops existing on the next redeploy, and
+    // nothing reads this column back today. Persisting it would just be
+    // recording a path that's already known to go stale (backlog item 2).
     const scanSessionResult = await query(
-      `INSERT INTO scan_sessions (user_id, shelf_id, books_found, image_url)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO scan_sessions (user_id, shelf_id, books_found, image_url, status)
+       VALUES ($1, $2, $3, $4, 'processing')
        RETURNING *`,
-      [req.user.id, shelfId, scanResult.booksFound, req.file.path]
+      [req.user.id, shelfId, 0, null]
     );
+    const scanSession = scanSessionResult.rows[0];
 
-    res.json({
-      message: 'Shelf scanned successfully',
-      scanSession: scanSessionResult.rows[0],
-      ...scanResult,
+    res.status(202).json({
+      message: 'Scan started',
+      scanSessionId: scanSession.id,
+      status: 'processing',
+    });
+
+    // Not awaited - the response above has already gone out. The .catch
+    // here only guards against processScanJob itself throwing unexpectedly
+    // (it already handles its own errors internally and records them via
+    // the 'failed' status), so a bug there can't become an unhandled
+    // promise rejection.
+    processScanJob(scanSession.id, imageBuffer).catch((error) => {
+      console.error('Unexpected scan job failure:', error);
     });
   } catch (error) {
     console.error('Scan shelf error:', error);
     res.status(500).json({ error: 'Failed to scan shelf', details: error.message });
-  } finally {
-    // Clean up uploaded file after processing (optional - keep for audit trail)
-    // if (req.file) {
-    //   fs.unlinkSync(req.file.path);
-    // }
+  }
+};
+
+// Poll the status/result of a scan started via scanShelf.
+export const getScanStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await query(
+      `SELECT status, books_found, result, error FROM scan_sessions WHERE id = $1 AND user_id = $2`,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Scan session not found' });
+    }
+
+    const row = result.rows[0];
+    const scanResult = row.result || {};
+
+    res.json({
+      status: row.status,
+      booksFound: row.books_found,
+      books: scanResult.books || [],
+      candidatesDetected: scanResult.candidatesDetected,
+      extractedText: scanResult.extractedText,
+      error: row.error,
+    });
+  } catch (error) {
+    console.error('Get scan status error:', error);
+    res.status(500).json({ error: 'Failed to fetch scan status' });
   }
 };
 

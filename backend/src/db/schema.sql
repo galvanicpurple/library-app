@@ -91,15 +91,30 @@ CREATE TABLE IF NOT EXISTS user_preferences (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Scan history for tracking scanning sessions
+-- Scan history for tracking scanning sessions. Also doubles as the async
+-- scan job's status record: a row is inserted with status='processing' the
+-- moment a shelf photo is submitted, then updated to 'completed'/'failed'
+-- once the OCR+matching pipeline finishes in the background (see
+-- scanController.js) - status/result/error don't apply to the older
+-- synchronous-only rows, which is why status defaults to 'completed'.
 CREATE TABLE IF NOT EXISTS scan_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     shelf_id UUID REFERENCES shelves(id) ON DELETE SET NULL,
     scanned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     books_found INTEGER DEFAULT 0,
-    image_url VARCHAR(500)
+    image_url VARCHAR(500),
+    status VARCHAR(20) NOT NULL DEFAULT 'completed', -- 'processing' | 'completed' | 'failed'
+    result JSONB,
+    error TEXT
 );
+
+-- CREATE TABLE IF NOT EXISTS above only helps a fresh database - it won't
+-- retroactively add columns to the already-existing scan_sessions table in
+-- a real deployed database, since migrate.js just re-runs this whole file.
+ALTER TABLE scan_sessions ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed';
+ALTER TABLE scan_sessions ADD COLUMN IF NOT EXISTS result JSONB;
+ALTER TABLE scan_sessions ADD COLUMN IF NOT EXISTS error TEXT;
 
 -- Create indexes for performance (skip if they already exist)
 CREATE INDEX IF NOT EXISTS idx_user_books_user_id ON user_books(user_id);

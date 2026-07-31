@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { recognizeImage } from './ocr/index.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 
 // Google Books API integration
 export const searchGoogleBooks = async (query) => {
@@ -257,31 +258,60 @@ const isExactShortTitleMatch = (queryTokens, titleTokens, matched) => (
   matched === 1 && titleTokens.size === 1 && queryTokens.size <= 2
 );
 
+// Subtitle text is real information but weaker evidence than the primary
+// title: a scan of "PAINT BY NUMBER" that matches a book actually *titled*
+// "Paint by Number" should beat one titled "Real Art!" that only mentions
+// "Paint by Number" in promotional subtitle text ("The Paint by Number Book
+// & Kit") - both share the same two words, but only one is the book that
+// text was printed on. Full credit for a title-field hit, half credit for a
+// subtitle-only one.
+const SUBTITLE_WEIGHT = 0.5;
+
 const scoreCandidate = (queryTokens, book) => {
-  const titleTokens = new Set(significantTokens(`${book.title || ''} ${book.subtitle || ''}`));
+  const titleOnlyTokens = new Set(significantTokens(book.title || ''));
+  const subtitleOnlyTokens = new Set(
+    significantTokens(book.subtitle || '').filter((t) => !titleOnlyTokens.has(t))
+  );
   const authorTokens = new Set(significantTokens((book.authors || []).join(' ')));
+  const combinedTitleTokens = new Set([...titleOnlyTokens, ...subtitleOnlyTokens]);
 
   let titleHits = 0;
+  let subtitleHits = 0;
   let authorHits = 0;
   let matched = 0;
   for (const token of queryTokens) {
-    const inTitle = titleTokens.has(token);
-    const inAuthor = authorTokens.has(token);
-    if (inTitle) titleHits += 1;
-    if (inAuthor) authorHits += 1;
-    if (inTitle || inAuthor) matched += 1;
+    const inTitle = titleOnlyTokens.has(token);
+    const inAuthor = !inTitle && authorTokens.has(token);
+    const inSubtitle = !inTitle && !inAuthor && subtitleOnlyTokens.has(token);
+    // Each branch below is checked only once a stronger field hasn't already
+    // claimed the token. Cheap activity/colouring books commonly have their
+    // "author" field filled with a brand-name imprint that echoes the title
+    // itself (e.g. "Paint Number Publishing" on a book literally titled
+    // "Paint by Number") - without this exclusivity, the same words get
+    // counted once at 1x (title) and again at 3x (author) for the exact
+    // same evidence, which let a colouring book outscore the real,
+    // correctly-authored "Paint by Number" by William L. Bird despite both
+    // genuinely sharing only the title words with the scan.
+    if (inTitle) {
+      titleHits += 1;
+    } else if (inAuthor) {
+      authorHits += 1;
+    } else if (inSubtitle) {
+      subtitleHits += 1;
+    }
+    if (inTitle || inAuthor || inSubtitle) matched += 1;
   }
 
   // Sharing nothing at all with the scan means this is not the book, however
   // highly Google ranked it.
   if (matched === 0) return 0;
 
-  if (matched < MIN_MATCHED_TOKENS && !isExactShortTitleMatch(queryTokens, titleTokens, matched)) {
+  if (matched < MIN_MATCHED_TOKENS && !isExactShortTitleMatch(queryTokens, combinedTitleTokens, matched)) {
     return 0;
   }
 
-  const unmatchedTitleWords = Math.max(0, titleTokens.size - titleHits);
-  return (titleHits + authorHits * AUTHOR_WEIGHT)
+  const unmatchedTitleWords = Math.max(0, combinedTitleTokens.size - titleHits - subtitleHits);
+  return (titleHits + subtitleHits * SUBTITLE_WEIGHT + authorHits * AUTHOR_WEIGHT)
     / (1 + unmatchedTitleWords * EXTRA_TITLE_WORD_PENALTY);
 };
 
@@ -291,7 +321,7 @@ const scoreCandidate = (queryTokens, book) => {
 // and reverted, since it promoted unrelated-but-newer titles (a 2025
 // commentary book outranking the Harry Potter novel it discusses). Ties keep
 // Google's own relevance order, with a cover image as the final tiebreak.
-const pickBestMatch = (queryText, books) => {
+export const pickBestMatch = (queryText, books) => {
   const queryTokens = new Set(significantTokens(queryText));
 
   // Nothing distinctive to verify against - typically OCR garbage such as an
@@ -373,6 +403,14 @@ const searchCandidate = async (candidate) => {
   return null;
 };
 
+// Each candidate's Google Books lookup is an independent HTTP round-trip
+// (possibly several, sequentially, inside searchCandidate itself), and this
+// loop was confirmed to be the dominant cost of a full scan - ~50s of an
+// ~80s total on a 15-spine real photo, more than the OCR stage. Bounded
+// concurrency here cuts that wall-clock time without changing which books
+// match (same candidates, same scoring, just run in parallel).
+const CANDIDATE_SEARCH_CONCURRENCY = 5;
+
 // Scan an image (single cover, single spine, or a shelf of many spines) and
 // identify every book it can find. Each detected text cluster is searched
 // independently so multiple books in one photo are each matched separately.
@@ -384,11 +422,9 @@ export const scanShelfImage = async (imageBuffer) => {
     // Cap how many candidates we search per scan to bound Google Books API usage.
     const candidates = dedupeCandidates(rawCandidates).slice(0, 15);
 
-    const foundBooks = [];
-    for (const candidate of candidates) {
-      const book = await searchCandidate(candidate);
-      if (book) foundBooks.push(book);
-    }
+    const foundBooks = (
+      await mapWithConcurrency(candidates, CANDIDATE_SEARCH_CONCURRENCY, searchCandidate)
+    ).filter(Boolean);
 
     // Remove duplicates based on ISBN or title
     const uniqueBooks = [];
